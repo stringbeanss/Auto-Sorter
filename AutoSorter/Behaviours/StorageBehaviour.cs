@@ -16,8 +16,6 @@ namespace pp.RaftMods.AutoSorter
     [DisallowMultipleComponent] //disallow to really make sure we never get into the situation of components being added twice on mod reload.
     public class CStorageBehaviour : MonoBehaviour_ID_Network
     {
-        private const int CREATIVE_INFINITE_COUNT = 2147483647;
-
         public Network_Player LocalPlayer => mi_localPlayer;
         public CSceneStorage SceneStorage => mi_sceneStorage;
         public Inventory Inventory => mi_inventory;
@@ -38,8 +36,6 @@ namespace pp.RaftMods.AutoSorter
         private Texture2D mi_originalTexture;
         private Texture2D mi_customTexture;
 
-        private CUISorterConfigDialog mi_configWindow;
-
         /// <summary>
         /// Initializes the auto-sorter storage behaviour providing a mod, scene storage and config UI handle.
         /// </summary>
@@ -50,7 +46,6 @@ namespace pp.RaftMods.AutoSorter
         {
             mi_mod                  = _mod;
             mi_sceneStorage         = _storage;
-            mi_configWindow         = _configDialog;
             mi_inventory            = mi_sceneStorage.StorageComponent.GetInventoryReference();
             mi_network              = ComponentManager<Raft_Network>.Value;
             mi_localPlayer          = mi_network.GetLocalPlayer();
@@ -120,6 +115,11 @@ namespace pp.RaftMods.AutoSorter
                             slot.locked) continue;
 
                         if (!toCheck.Contains(slot.itemInstance.UniqueIndex)) continue;
+                        if (!targetInventory)
+                        {
+                            CUtil.LogW("Lost reference to target inventory during item check. Aborting check.");
+                            break;
+                        }
 
                         var transferResult = TransferItemsFromInventory(storage, targetInventory, slot, out int itemsTransferred, mi_sceneStorage.Data.AutoMode ? null : mi_sceneStorage.Data.Filters[slot.itemInstance.UniqueIndex]);
                         totalItemsTransfered += itemsTransferred;
@@ -163,7 +163,7 @@ namespace pp.RaftMods.AutoSorter
                 case EStorageRequestType.RESPOND_STATE:
                     mi_sceneStorage.Data = _msg.Info;
                     mi_sceneStorage.AdditionalData = _msg.AdditionalInfo;
-                    if (_msg.Info != null)
+                    if (mi_sceneStorage.IsUpgraded) //only update the materials if the storage has been upgraded as this message is for initial upgrades on world load only
                     {
                         UpdateStorageMaterials();
                     }
@@ -173,15 +173,15 @@ namespace pp.RaftMods.AutoSorter
                     UpdateStorageMaterials();
                     return;
                 case EStorageRequestType.STORAGE_DATA_UPDATE:
-                    mi_sceneStorage.Data = _msg.Info;
-                    if(Raft_Network.IsHost)
+                    mi_sceneStorage.Data = _msg.Info; //might be null if the storage has not been upgraded yet
+                    if(Raft_Network.IsHost && mi_sceneStorage.IsUpgraded)
                     {
                         mi_sceneStorage.Data.SaveName = SaveAndLoad.CurrentGameFileName; //make sure we set the save name again on the hosts side as the clients do not know about the save name
                     }
                     return;
                 case EStorageRequestType.STORAGE_IGNORE_UPDATE:
-                    mi_sceneStorage.AdditionalData = _msg.AdditionalInfo;
-                    if (Raft_Network.IsHost)
+                    mi_sceneStorage.AdditionalData = _msg.AdditionalInfo; //might be null if a storage is un-ignored
+                    if (Raft_Network.IsHost && mi_sceneStorage.AdditionalData != null)
                     {
                         mi_sceneStorage.AdditionalData.SaveName = SaveAndLoad.CurrentGameFileName; //make sure we set the save name again on the hosts side as the clients do not know about the save name
                     }

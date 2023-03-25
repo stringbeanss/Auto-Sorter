@@ -22,7 +22,7 @@ namespace pp.RaftMods.AutoSorter
         /// </summary>
         public static CAutoSorter Get = null;
 
-        public const string VERSION                                 = "1.4.1";
+        public const string VERSION                                 = "1.4.2";
         public const string MOD_NAME                                = "AutoSorter";
         private const string MOD_NAMESPACE                          = "pp.RaftMods." + MOD_NAME;
 
@@ -504,6 +504,8 @@ namespace pp.RaftMods.AutoSorter
                 {
                     yield return new WaitForSeconds((float)(Config.CheckIntervalSeconds - mi_lastCheckDurationSeconds));
                 }
+
+                yield return new WaitForEndOfFrame();
             }
         }
         
@@ -682,14 +684,13 @@ namespace pp.RaftMods.AutoSorter
                     
                     try
                     {
-                        if(inventoryUpdate != null)
+                        if (inventoryUpdate != null)
                         {
                             if (!mi_registeredNetworkBehaviours.ContainsKey(inventoryUpdate.storageObjectIndex))
                             {
                                 CUtil.LogW("No receiver with ID " + inventoryUpdate.storageObjectIndex + " found.");
                                 continue;
                             }
-
                             mi_registeredNetworkBehaviours[inventoryUpdate.storageObjectIndex].OnInventoryUpdateReceived(inventoryUpdate);
                             continue;
                         }
@@ -707,7 +708,7 @@ namespace pp.RaftMods.AutoSorter
                             continue;
                         }
 
-                        if(modMessage.Info != null)
+                        if (modMessage.Info != null)
                         {
                             modMessage.Info.OnAfterDeserialize();
                         }
@@ -715,9 +716,11 @@ namespace pp.RaftMods.AutoSorter
                         CUtil.LogD($"Received {modMessage.Type}({package.t}) message from \"{remoteID}\".");
                         mi_registeredNetworkBehaviours[modMessage.ObjectIndex].OnNetworkMessageReceived(modMessage, remoteID);
                     }
-                    catch(System.Exception)
+                    catch(System.Exception _e)
                     {
-                        CUtil.LogW("Failed to read mod network message. You or one of your fellow players might have to update the mod.");
+                        CUtil.LogW($"Failed to read mod network message ({package.Type}) as {(Raft_Network.IsHost ? "host" : "client")}. You or one of your fellow players might have to update the mod.");
+                        CUtil.LogD(_e.Message);
+                        CUtil.LogD(_e.StackTrace);
                     }
                 }
 
