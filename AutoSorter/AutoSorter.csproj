@@ -46,6 +46,7 @@
     <Compile Include="DTO\SorterStorageData.cs" />
     <Compile Include="DTO\StorageRequestType.cs" />
     <None Include="LICENSE" />
+    <Compile Include="Manager\StorageManager.cs" />
     <Compile Include="UI\CUIDialog.cs" />
     <Compile Include="UI\CUISorterConfigDialog.cs" />
     <Compile Include="UI\CUISorterConfigItem.cs" />

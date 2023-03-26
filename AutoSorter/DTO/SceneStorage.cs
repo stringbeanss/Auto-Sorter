@@ -6,6 +6,7 @@
     public class CSceneStorage
     {
         public bool IsUpgraded => Data != null;
+        public uint ObjectIndex => StorageComponent.ObjectIndex;
         public CSorterStorageData Data;
         public CGeneralStorageData AdditionalData;
         public CStorageBehaviour AutoSorter;

@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using AutoSorter.Manager;
 using FMODUnity;
 using HarmonyLib;
 using pp.RaftMods.AutoSorter.Protocol;
@@ -22,7 +23,7 @@ namespace pp.RaftMods.AutoSorter
 
         private bool HasInventorySpaceLeft => mi_inventory?.allSlots.Any(_o => _o.active && !_o.locked && !_o.StackIsFull()) ?? false;
 
-        private CAutoSorter mi_mod;
+        private ASStorageManager mi_storageManager;
         private Raft_Network mi_network;
         private Network_Player mi_localPlayer;
 
@@ -42,9 +43,9 @@ namespace pp.RaftMods.AutoSorter
         /// <param name="_mod">A handle to the mod object initializing this storage behaviour.</param>
         /// <param name="_storage">Reference to the scene storage which contains this storage behaviour.</param>
         /// <param name="_configDialog">Reference to the auto-sorter UI.</param>
-        public void Load(CAutoSorter _mod, CSceneStorage _storage, CUISorterConfigDialog _configDialog)
+        public void Load(ASStorageManager _storageManager, CSceneStorage _storage)
         {
-            mi_mod                  = _mod;
+            mi_storageManager       = _storageManager;
             mi_sceneStorage         = _storage;
             mi_inventory            = mi_sceneStorage.StorageComponent.GetInventoryReference();
             mi_network              = ComponentManager<Raft_Network>.Value;
@@ -60,18 +61,18 @@ namespace pp.RaftMods.AutoSorter
             }
             else
             {
-                if (mi_mod.SavedSorterStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
+                if (mi_storageManager.SavedSorterStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
                 {
-                    var data = mi_mod.SavedSorterStorageData[SaveAndLoad.CurrentGameFileName].FirstOrDefault(_o => _o.ObjectID == ObjectIndex);
+                    var data = mi_storageManager.SavedSorterStorageData[SaveAndLoad.CurrentGameFileName].FirstOrDefault(_o => _o.ObjectID == ObjectIndex);
                     if (data != null)
                     {
                         mi_sceneStorage.Data = data;
                         UpdateStorageMaterials();
                     }
                 }
-                if (mi_mod.SavedAdditionaStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
+                if (mi_storageManager.SavedAdditionaStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
                 {
-                    var additionalData = mi_mod.SavedAdditionaStorageData[SaveAndLoad.CurrentGameFileName].FirstOrDefault(_o => _o.ObjectID == ObjectIndex);
+                    var additionalData = mi_storageManager.SavedAdditionaStorageData[SaveAndLoad.CurrentGameFileName].FirstOrDefault(_o => _o.ObjectID == ObjectIndex);
                     if (additionalData != null)
                     {
                         mi_sceneStorage.AdditionalData = additionalData;
@@ -99,7 +100,7 @@ namespace pp.RaftMods.AutoSorter
                                             .ToList() : 
                                         mi_sceneStorage.Data.Filters.Select(_o => _o.Key).ToList();
 
-                foreach (var storage in mi_mod.SceneStorages)
+                foreach (var storage in mi_storageManager.SceneStorages)
                 {
                     if ((storage.AdditionalData != null && storage.AdditionalData.Ignore) ||
                         storage == mi_sceneStorage ||
@@ -268,7 +269,7 @@ namespace pp.RaftMods.AutoSorter
             mi_sceneStorage.Data = null;
             UpdateStorageMaterials();
             NetworkIDManager.RemoveNetworkID(this);
-            mi_mod.UnregisterStorage(mi_sceneStorage);
+            mi_storageManager.UnregisterStorage(mi_sceneStorage);
             mi_loaded = false;
         }
         
