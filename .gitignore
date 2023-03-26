@@ -1,4 +1,6 @@
 bin/
 obj/
 *.rmod
+*.rplugin
 /.vs/
+/assets_backup
