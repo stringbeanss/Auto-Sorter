@@ -1,4 +1,5 @@
-﻿using pp.RaftMods.AutoSorter.Protocol;
+﻿using AutoSorter.Manager;
+using pp.RaftMods.AutoSorter.Protocol;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -63,6 +64,7 @@ namespace pp.RaftMods.AutoSorter
         private MenuType mi_previousMenuType;
         private bool mi_isHidden;
 
+        private CAutoSorter mi_mod;
         private EAdditionalItemFilterType mi_additionalItemFilter;
 
         private void Awake()
@@ -152,8 +154,9 @@ namespace pp.RaftMods.AutoSorter
         /// Sets the item prefab reference-
         /// </summary>
         /// <param name="_itemPrefab"></param>
-        public void Load(GameObject _itemPrefab)
+        public void Load(CAutoSorter _mod, GameObject _itemPrefab)
         {
+            mi_mod = _mod;
             mi_itemAsset = _itemPrefab;
         }
 
@@ -178,7 +181,7 @@ namespace pp.RaftMods.AutoSorter
                 mi_hideButton.gameObject.SetActive(false);
                 mi_helpOverlay.gameObject.SetActive(true);
                 CAutoSorter.Config.InitialHelpShown = true;
-                CAutoSorter.Get.SaveConfig();
+                mi_mod.SaveConfig();
             }
 
             if (mi_loaded)
@@ -254,7 +257,7 @@ namespace pp.RaftMods.AutoSorter
                     CUtil.LogE("Prefab error on sorter config item. Invalid prefab setup.");
                     yield break;
                 }
-                cfgItem.Load(item);
+                cfgItem.Load(mi_mod, item);
                 mi_itemControls.Add(item.UniqueIndex, cfgItem);
                 go.SetActive(false);
                 ++current;
@@ -392,21 +395,21 @@ namespace pp.RaftMods.AutoSorter
         {
             if (mi_currentStorage.AutoSorter.Upgrade())
             {
-                CAutoSorter.Get.Sounds?.PlayUI_Click();
+                mi_mod.Sounds?.PlayUI_Click();
                 mi_upgradeOverlay.gameObject.SetActive(false);
                 LoadWorkingData();
             }
             else
             {
-                CAutoSorter.Get.Sounds?.PlayUI_Click_Fail();
+                mi_mod.Sounds?.PlayUI_Click_Fail();
             }
         }
 
         private void OnDowngradeButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds.PlayUI_Click();
 
-            CAutoSorter.Get.Dialog.ShowPrompt(
+            mi_mod.Dialog.ShowPrompt(
                 "Are you sure you want to downgrade to a regular storage?",
                 _result =>
                 {
@@ -421,7 +424,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnAutoModeToggled(bool _isOn)
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds.PlayUI_Click();
 
             mi_currentStorage.Data.AutoMode = _isOn;
 
@@ -433,7 +436,7 @@ namespace pp.RaftMods.AutoSorter
             ++mi_currentStorage.Data.Priority;
             UpdatePriorityLabel();
 
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds.PlayUI_Click();
         }
 
         private void OnPriorityDecreaseButtonClick()
@@ -441,7 +444,7 @@ namespace pp.RaftMods.AutoSorter
             --mi_currentStorage.Data.Priority;
             UpdatePriorityLabel();
 
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
         }
     
         private void OnInputValueChanged(string _input)
@@ -469,9 +472,9 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnSelectAllClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
-            CAutoSorter.Get.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?", 
+            mi_mod.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?", 
             _result =>
             {
                 if (!_result) return;
@@ -484,9 +487,9 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnDeselectAllClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
-            CAutoSorter.Get.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?",
+            mi_mod.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?",
             _result =>
             {
                 if (!_result) return;
@@ -499,7 +502,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnSelectFilteredClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             foreach (var toggle in mi_itemControls)
             {
@@ -510,7 +513,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnDeselectFilteredClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             foreach (var toggle in mi_itemControls)
             {
@@ -521,7 +524,7 @@ namespace pp.RaftMods.AutoSorter
         
         private void OnCloseHelpButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(true);
             mi_helpOverlay.gameObject.SetActive(false);
@@ -529,7 +532,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnOpenHelpButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(false);
             mi_helpOverlay.gameObject.SetActive(true);
@@ -537,7 +540,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnHideButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(false);
             mi_showButton.gameObject.SetActive(true);
@@ -556,7 +559,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnShowButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(true);
             mi_showButton.gameObject.SetActive(false);
@@ -580,10 +583,10 @@ namespace pp.RaftMods.AutoSorter
         }
         private void OnIgnoreButtonClick()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             mi_currentStorage.AdditionalData = new CGeneralStorageData(mi_currentStorage.AutoSorter.ObjectIndex, true);
-            CAutoSorter.Get.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.AutoSorter.ObjectIndex) { AdditionalInfo = mi_currentStorage.AdditionalData });
+            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.AutoSorter.ObjectIndex) { AdditionalInfo = mi_currentStorage.AdditionalData });
 
             mi_includeButton.gameObject.SetActive(true);
             mi_ignoreButton.gameObject.SetActive(false);
@@ -591,11 +594,11 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnIncludeButtonClick()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             mi_currentStorage.AdditionalData = null;
 
-            CAutoSorter.Get.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.AutoSorter.ObjectIndex) { AdditionalInfo = null });
+            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.AutoSorter.ObjectIndex) { AdditionalInfo = null });
 
             mi_includeButton.gameObject.SetActive(false);
             mi_ignoreButton.gameObject.SetActive(true);

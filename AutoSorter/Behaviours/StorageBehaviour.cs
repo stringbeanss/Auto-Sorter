@@ -23,7 +23,7 @@ namespace pp.RaftMods.AutoSorter
 
         private bool HasInventorySpaceLeft => mi_inventory?.allSlots.Any(_o => _o.active && !_o.locked && !_o.StackIsFull()) ?? false;
 
-        private ASStorageManager mi_storageManager;
+        private CStorageManager mi_storageManager;
         private Raft_Network mi_network;
         private Network_Player mi_localPlayer;
 
@@ -43,7 +43,7 @@ namespace pp.RaftMods.AutoSorter
         /// <param name="_mod">A handle to the mod object initializing this storage behaviour.</param>
         /// <param name="_storage">Reference to the scene storage which contains this storage behaviour.</param>
         /// <param name="_configDialog">Reference to the auto-sorter UI.</param>
-        public void Load(ASStorageManager _storageManager, CSceneStorage _storage)
+        public void Load(CStorageManager _storageManager, CSceneStorage _storage)
         {
             mi_storageManager       = _storageManager;
             mi_sceneStorage         = _storage;
@@ -53,11 +53,11 @@ namespace pp.RaftMods.AutoSorter
             //use our block objects index so we receive RPC calls
             //need to use an existing block index as clients/host need to be aware of it
             ObjectIndex             = mi_sceneStorage.StorageComponent.ObjectIndex;
-            CAutoSorter.Get.RegisterNetworkBehaviour(this);
+            CNetwork.RegisterNetworkBehaviour(this);
 
             if (!Raft_Network.IsHost)
             {
-                CAutoSorter.Get.SendTo(new CDTO(EStorageRequestType.REQUEST_STATE, ObjectIndex), mi_network.HostID);
+                CNetwork.SendTo(new CDTO(EStorageRequestType.REQUEST_STATE, ObjectIndex), mi_network.HostID);
             }
             else
             {
@@ -100,7 +100,7 @@ namespace pp.RaftMods.AutoSorter
                                             .ToList() : 
                                         mi_sceneStorage.Data.Filters.Select(_o => _o.Key).ToList();
 
-                foreach (var storage in mi_storageManager.SceneStorages)
+                foreach (var storage in mi_storageManager.SceneStorages.Values)
                 {
                     if ((storage.AdditionalData != null && storage.AdditionalData.Ignore) ||
                         storage == mi_sceneStorage ||
@@ -131,8 +131,8 @@ namespace pp.RaftMods.AutoSorter
 
                     if(totalItemsTransfered > 0)
                     {
-                        CAutoSorter.Get.BroadcastInventoryState(storage.AutoSorter);
-                        CAutoSorter.Get.BroadcastInventoryState(this);
+                        CNetwork.BroadcastInventoryState(storage.AutoSorter);
+                        CNetwork.BroadcastInventoryState(this);
                     }
                 }
             }
@@ -158,7 +158,7 @@ namespace pp.RaftMods.AutoSorter
                     {
                         if (!mi_sceneStorage.IsUpgraded && mi_sceneStorage.AdditionalData == null) return;
 
-                        CAutoSorter.Get.SendTo(new CDTO(EStorageRequestType.RESPOND_STATE, ObjectIndex) { Info = mi_sceneStorage.Data, AdditionalInfo = mi_sceneStorage.AdditionalData }, _remoteID);
+                        CNetwork.SendTo(new CDTO(EStorageRequestType.RESPOND_STATE, ObjectIndex) { Info = mi_sceneStorage.Data, AdditionalInfo = mi_sceneStorage.AdditionalData }, _remoteID);
                     }
                     break;
                 case EStorageRequestType.RESPOND_STATE:
@@ -187,6 +187,10 @@ namespace pp.RaftMods.AutoSorter
                         mi_sceneStorage.AdditionalData.SaveName = SaveAndLoad.CurrentGameFileName; //make sure we set the save name again on the hosts side as the clients do not know about the save name
                     }
                     break;
+                case EStorageRequestType.STORAGE_DIRTY:
+                    mi_sceneStorage.IsInventoryDirty = true;
+                    CUtil.LogD("Inventory for storage " + mi_sceneStorage.AutoSorter.name + " was marked as dirty by client.");
+                    return;
             }
         }
 
@@ -256,10 +260,7 @@ namespace pp.RaftMods.AutoSorter
         {
             base.OnDestroy();
 
-            if (CAutoSorter.Get != null)
-            {
-                CAutoSorter.Get.UnregisterNetworkBehaviour(this);
-            }
+            CNetwork.UnregisterNetworkBehaviour(this);
 
             if (mi_customTexture)
             {
@@ -362,7 +363,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void SendUpgradeState(bool _isUpgraded)
         {
-            CAutoSorter.Get.Broadcast(new CDTO(EStorageRequestType.UPGRADE, ObjectIndex) { Upgrade = _isUpgraded }); ;
+            CNetwork.Broadcast(new CDTO(EStorageRequestType.UPGRADE, ObjectIndex) { Upgrade = _isUpgraded }); ;
         }
     
         private bool CheckIsEligibleToTransfer(ItemInstance _item, CSceneStorage _storage, out int _itemRestriction) //make sure if we are transferring between auto-sorters we use priorities to prevent item loops.

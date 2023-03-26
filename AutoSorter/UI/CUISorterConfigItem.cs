@@ -24,13 +24,15 @@ namespace pp.RaftMods.AutoSorter
         private CSceneStorage mi_storage;
 
         private MenuType mi_previousMenuType;
+        private CAutoSorter mi_mod;
 
         /// <summary>
         /// Load the UI element for the given item.
         /// </summary>
         /// <param name="_item">The raft item object this UI element will represent.</param>
-        public void Load(Item_Base _item)
+        public void Load(CAutoSorter _mod, Item_Base _item)
         {   
+            mi_mod = _mod;
             mi_itemImage               = transform.Find("Item_Image").GetChild(0).GetComponent<Image>();
             mi_itemText                = transform.Find("Item_Name").GetComponent<TextMeshProUGUI>();
             ItemToggle                 = transform.Find("Item_Toggle").GetComponent<Toggle>();
@@ -71,7 +73,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnItemToggled(bool _item)
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             if (!_item)
             {
@@ -87,7 +89,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnAmountControlToggled(bool _controlAmount)
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds?.PlayUI_Click();
 
             if (!mi_storage.Data.Filters.ContainsKey(mi_representsItem.UniqueIndex)) return;
 

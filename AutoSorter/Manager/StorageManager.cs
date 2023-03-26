@@ -1,6 +1,7 @@
 ﻿using HarmonyLib;
 using Newtonsoft.Json;
 using pp.RaftMods.AutoSorter;
+using pp.RaftMods.AutoSorter.Protocol;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -10,7 +11,7 @@ using UnityEngine;
 
 namespace AutoSorter.Manager
 {
-    public class ASStorageManager
+    public class CStorageManager
     {
         public bool HasStorages => SceneStorages.Count > 0;
 
@@ -33,13 +34,12 @@ namespace AutoSorter.Manager
         /// </summary>
         public Dictionary<uint, CSceneStorage> SceneStorages { get; private set; } = new Dictionary<uint, CSceneStorage>();
 
-        private readonly List<Inventory> mi_dirtyInventories = new List<Inventory>();
         private readonly Queue<CSceneStorage> mi_registerQueuedStorages = new Queue<CSceneStorage>();
         private readonly Queue<CSceneStorage> mi_unregisterQueuedStorages = new Queue<CSceneStorage>();
         private readonly string m_modDataDirectory;
         private bool mi_deferStorageRegister;
 
-        public ASStorageManager(string _modDataDirectory)
+        public CStorageManager(string _modDataDirectory)
         {
             m_modDataDirectory = _modDataDirectory;
         }
@@ -56,7 +56,6 @@ namespace AutoSorter.Manager
             {
                 storage.Value.IsInventoryDirty = false;
             }
-            mi_dirtyInventories.Clear();
             mi_deferStorageRegister = false;
             FlushStorageQueues();
         }
@@ -113,13 +112,30 @@ namespace AutoSorter.Manager
 
         public void SetStorageInventoryDirty(Inventory _inventory)
         {
+            if (!Raft_Network.IsHost) return;
             if (_inventory is PlayerInventory) return;
-            if (mi_dirtyInventories.Contains(_inventory)) return;
             var storageForInventory = SceneStorages.Values.FirstOrDefault(_o => _o.AutoSorter.Inventory == _inventory);
             if (storageForInventory == null) return;
-            mi_dirtyInventories.Add(_inventory);
             storageForInventory.IsInventoryDirty = true;
-            CUtil.LogD("Inventory for storage " + storageForInventory.AutoSorter.name + " is marked as dirty.");
+            CUtil.LogD($"Inventory for storage \"{storageForInventory.AutoSorter.name}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
+        }
+        
+        public void OnInventoryChanged(Inventory _inventory)
+        {
+            if (_inventory is PlayerInventory) return;
+            var storageForInventory = SceneStorages.Values.FirstOrDefault(_o => _o.AutoSorter.Inventory == _inventory);
+            if (storageForInventory == null) return;
+
+            if (Raft_Network.IsHost)
+            {
+                storageForInventory.IsInventoryDirty = true;
+                CUtil.LogD($"Inventory for storage \"{storageForInventory.AutoSorter.name}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
+            }
+            else
+            {
+                CNetwork.BroadcastInventoryState(storageForInventory.AutoSorter);
+                CUtil.LogD($"Inventory for storage \"{storageForInventory.AutoSorter.name}\"({storageForInventory.ObjectIndex}) changed.");
+            }
         }
 
         private void FlushStorageQueues()

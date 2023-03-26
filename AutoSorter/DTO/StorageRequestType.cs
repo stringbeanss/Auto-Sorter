@@ -29,5 +29,9 @@
         /// Sent whenever the ignore state of a storage changed.
         /// </summary>
         STORAGE_IGNORE_UPDATE       = -46,
+        /// <summary>
+        /// Sent to the host whenever a client marks a storage inventory dirty.
+        /// </summary>
+        STORAGE_DIRTY = -47
     }
 }

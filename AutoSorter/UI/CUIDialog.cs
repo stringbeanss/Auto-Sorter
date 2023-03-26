@@ -17,6 +17,8 @@ namespace pp.RaftMods.AutoSorter
         private System.Action<bool> mi_currentPromptCallback;
         private bool mi_dialogVisible;
 
+        private CAutoSorter mi_mod;
+
         private void Awake()
         {
             mi_dialogText       = transform.Find("Content/Text_Dialog").GetComponent<TextMeshProUGUI>(); //from the scroll rect get viewport and then the content anchor to spawn item prefabs in
@@ -34,6 +36,11 @@ namespace pp.RaftMods.AutoSorter
             gameObject.SetActive(false);
         }
         #endregion
+
+        public void Load(CAutoSorter _mod)
+        {
+            mi_mod = _mod;
+        }
 
         /// <summary>
         /// Hide the user dialog.
@@ -87,7 +94,7 @@ namespace pp.RaftMods.AutoSorter
             mi_dialogVisible = true;
             gameObject.SetActive(true);
 
-            CAutoSorter.Get.Sounds?.PlayUI_OpenMenu();
+            mi_mod.Sounds?.PlayUI_OpenMenu();
 
             mi_okButton.gameObject.SetActive(true);
             mi_dialogText.text = _message;
@@ -100,7 +107,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnOkButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds.PlayUI_Click();
 
             mi_currentInfoCallback?.Invoke();
             mi_currentInfoCallback = null;
@@ -113,7 +120,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnCancelButtonClicked()
         {
-            CAutoSorter.Get.Sounds?.PlayUI_Click();
+            mi_mod.Sounds.PlayUI_Click();
 
             mi_currentPromptCallback?.Invoke(false);
             mi_currentPromptCallback = null;

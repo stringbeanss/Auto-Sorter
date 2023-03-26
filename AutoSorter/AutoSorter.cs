@@ -1,15 +1,14 @@
 ﻿using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Web;
 using AutoSorter.Manager;
 using HarmonyLib;
 using HMLLibrary;
 using Newtonsoft.Json;
 using pp.RaftMods.AutoSorter.Protocol;
 using RaftModLoader;
-using Steamworks;
 using UnityEngine;
 
 namespace pp.RaftMods.AutoSorter
@@ -23,9 +22,9 @@ namespace pp.RaftMods.AutoSorter
         /// <summary>
         /// Explicitly typed mod instance for static access.
         /// </summary>
-        public static CAutoSorter Get = null;
+        private static CAutoSorter Get = null;
 
-        public const string VERSION                                 = "1.4.2";
+        public const string VERSION                                 = "1.5.0";
         public const string MOD_NAME                                = "AutoSorter";
         private const string MOD_NAMESPACE                          = "pp.RaftMods." + MOD_NAME;
 
@@ -69,16 +68,8 @@ namespace pp.RaftMods.AutoSorter
 
         private GameObject mi_uiRoot;
         private CUISorterConfigDialog mi_configDialog;
-        private Raft_Network mi_network;
 
-        private static short mi_modMessagesFloor = short.MaxValue;
-        private static short mi_modMessagesCeil = short.MinValue;
-
-        private static Dictionary<uint, CStorageBehaviour> mi_registeredNetworkBehaviours = new Dictionary<uint, CStorageBehaviour>();
-
-        private bool mi_runningStorageCheck;
-        
-        private ASStorageManager mi_storageManager;
+        private CStorageManager mi_storageManager;
 
         #region ENGINE_CALLBACKS
         /// <summary>
@@ -94,12 +85,6 @@ namespace pp.RaftMods.AutoSorter
             Get = this;
 
             LoadConfig();
-
-            foreach (EStorageRequestType m in System.Enum.GetValues(typeof(EStorageRequestType)))
-            {
-                mi_modMessagesFloor = (short)Mathf.Min(mi_modMessagesFloor, (short)m);
-                mi_modMessagesCeil  = (short)Mathf.Max(mi_modMessagesCeil, (short)m);
-            }
 
             mi_harmony = new Harmony(MOD_NAMESPACE);
             mi_harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -124,19 +109,13 @@ namespace pp.RaftMods.AutoSorter
                 HelpText = "Failed to load!";
             }
 
-            mi_network = ComponentManager<Raft_Network>.Value;
-            if (!mi_network)
-            {
-                CUtil.LogW("Failed to get network manager on mod load.");
-            }
-
             Sounds = ComponentManager<SoundManager>.Value;
             if (!Sounds)
             {
                 CUtil.LogW("Failed to get sound manager on mod load.");
             }
 
-            mi_storageManager = new ASStorageManager(ModDataDirectory);
+            mi_storageManager = new CStorageManager(ModDataDirectory);
             mi_storageManager.LoadStorageData();
 
             CUtil.Log($"{MOD_NAME} v. {VERSION} loaded.");
@@ -148,6 +127,8 @@ namespace pp.RaftMods.AutoSorter
             mi_checkChests = false;
             StopAllCoroutines();
             mi_storageManager.Cleanup();
+
+            CNetwork.Clear();
 
             if (mi_harmony != null)
             {
@@ -183,9 +164,12 @@ namespace pp.RaftMods.AutoSorter
                 LoadUI();
             }
             StartCoroutine(mi_configDialog.LoadItems());
-           
-            mi_checkChests = true;
-            mi_chestRoutineHandle = StartCoroutine(Run());
+
+            if (Raft_Network.IsHost)
+            {
+                mi_checkChests = true;
+                mi_chestRoutineHandle = StartCoroutine(Run());
+            }
             CUtil.LogD($"World \"{SaveAndLoad.CurrentGameFileName}\" loaded.");
         }
 
@@ -200,6 +184,7 @@ namespace pp.RaftMods.AutoSorter
             StopAllCoroutines();
 
             mi_storageManager.Cleanup();
+            CNetwork.Clear();
         }
 
         /// <summary>
@@ -211,40 +196,6 @@ namespace pp.RaftMods.AutoSorter
             mi_storageManager.SaveStorageData();
         }
         #endregion
-
-        public void UnregisterNetworkBehaviour(CStorageBehaviour _behaviour)
-        {
-            mi_registeredNetworkBehaviours.Remove(_behaviour.ObjectIndex);
-        }
-
-        public void SendTo(CDTO _object, CSteamID _id)
-        {
-            CUtil.LogD("Sending " + _object.Type + " to " + _id.m_SteamID + ".");
-            mi_network.SendP2P(_id, CreateCarrierDTO(_object), EP2PSend.k_EP2PSendReliable, NetworkChannel.Channel_Game);
-        }
-
-        public void Broadcast(CDTO _object)
-        {
-            CUtil.LogD("Broadcasting " + _object.Type + " to others.");
-            mi_network.RPC(CreateCarrierDTO(_object), Target.Other, EP2PSend.k_EP2PSendReliable, NetworkChannel.Channel_Game);
-        }
-
-        public void BroadcastInventoryState(CStorageBehaviour _storageBehaviour)
-        {
-            CUtil.LogD("Broadcasting storage inventory change to others.");
-            mi_network.RPC(new Message_Storage_Close((Messages)EStorageRequestType.STORAGE_INVENTORY_UPDATE, _storageBehaviour.LocalPlayer.StorageManager, _storageBehaviour.SceneStorage.StorageComponent), Target.Other, EP2PSend.k_EP2PSendReliable, NetworkChannel.Channel_Game);
-        }
-
-        public void RegisterNetworkBehaviour(CStorageBehaviour _behaviour)
-        {
-            if (mi_registeredNetworkBehaviours.ContainsKey(_behaviour.ObjectIndex))
-            {
-                CUtil.LogW("Behaviour with ID" + _behaviour.ObjectIndex + " \"" + _behaviour.name + "\" was already registered.");
-                return;
-            }
-
-            mi_registeredNetworkBehaviours.Add(_behaviour.ObjectIndex, _behaviour);
-        }
 
         public void SaveConfig()
         {
@@ -361,7 +312,7 @@ namespace pp.RaftMods.AutoSorter
 
             Transform configDialogRoot = mi_uiRoot.transform.Find("ConfigDialog");
             mi_configDialog = configDialogRoot.gameObject.AddComponent<CUISorterConfigDialog>();
-            mi_configDialog.Load(itemAsset);
+            mi_configDialog.Load(this, itemAsset);
 
             Transform dialogRoot = mi_uiRoot.transform.Find("Dialog");
             Dialog = dialogRoot.gameObject.AddComponent<CUIDialog>();
@@ -377,18 +328,6 @@ namespace pp.RaftMods.AutoSorter
             mi_storageManager.RegisterStorage(_storage);
         }
 
-        private Message CreateCarrierDTO(CDTO _object)
-        {
-            if (_object.Info != null)
-            {
-                _object.Info.OnBeforeSerialize();
-            }
-            return new Message_InitiateConnection(
-                                    (Messages)_object.Type,
-                                    0,
-                                    JsonConvert.SerializeObject(_object));
-        }
-
         private IEnumerator WaitAndShowUI(CSceneStorage _storage)
         {
             while (mi_configDialog == null) yield return new WaitForEndOfFrame();
@@ -397,83 +336,6 @@ namespace pp.RaftMods.AutoSorter
         }
 
         #region PATCHES
-        [HarmonyPatch(typeof(NetworkUpdateManager), "Deserialize")]
-        private class CHarmonyPatch_NetworkUpdateManager_Deserialize
-        {
-            [HarmonyPrefix]
-            private static bool Deserialize(Packet_Multiple packet, CSteamID remoteID) 
-            {
-                List<Message> resultMessages    = packet.messages.ToList();
-                List<Message> messages          = packet.messages.ToList();
-
-                foreach (Message package in messages)
-                {
-                    if (package.t > mi_modMessagesCeil || package.t < mi_modMessagesFloor)
-                    {
-                        continue; //this is a message type not from this mod, ignore this package.
-                    }
-
-                    var inventoryUpdate = package as Message_Storage_Close;
-                    var msg = package as Message_InitiateConnection;
-                    if (msg == null && inventoryUpdate == null)
-                    {
-                        CUtil.LogW("Invalid auto-sorter mod message received. Make sure all connected players use the same mod version.");
-                        continue;
-                    }
-
-                    resultMessages.Remove(package);
-                    
-                    try
-                    {
-                        if (inventoryUpdate != null)
-                        {
-                            if (!mi_registeredNetworkBehaviours.ContainsKey(inventoryUpdate.storageObjectIndex))
-                            {
-                                CUtil.LogW("No receiver with ID " + inventoryUpdate.storageObjectIndex + " found.");
-                                continue;
-                            }
-                            mi_registeredNetworkBehaviours[inventoryUpdate.storageObjectIndex].OnInventoryUpdateReceived(inventoryUpdate);
-                            continue;
-                        }
-
-                        CDTO modMessage = JsonConvert.DeserializeObject<CDTO>(msg.password);
-                        if (modMessage == null)
-                        {
-                            CUtil.LogW("Invalid network message received. Update the AutoSorter mod or make sure all connected players use the same version.");
-                            continue;
-                        }
-
-                        if (!mi_registeredNetworkBehaviours.ContainsKey(modMessage.ObjectIndex))
-                        {
-                            CUtil.LogW("No receiver with ID " + modMessage.ObjectIndex + " found.");
-                            continue;
-                        }
-
-                        if (modMessage.Info != null)
-                        {
-                            modMessage.Info.OnAfterDeserialize();
-                        }
-
-                        CUtil.LogD($"Received {modMessage.Type}({package.t}) message from \"{remoteID}\".");
-                        mi_registeredNetworkBehaviours[modMessage.ObjectIndex].OnNetworkMessageReceived(modMessage, remoteID);
-                    }
-                    catch(System.Exception _e)
-                    {
-                        CUtil.LogW($"Failed to read mod network message ({package.Type}) as {(Raft_Network.IsHost ? "host" : "client")}. You or one of your fellow players might have to update the mod.");
-                        CUtil.LogD(_e.Message);
-                        CUtil.LogD(_e.StackTrace);
-                    }
-                }
-
-                if (resultMessages.Count == 0) return false; //no packages left, nothing todo. Dont even call the vanilla method
-
-                //we remove all custom messages from the provided package and reassign the modified list so it is passed to the vanilla method.
-                //this is to make sure we dont lose any vanilla packages
-                packet.messages = resultMessages.ToArray();
-                return true; //nothing for the mod left to do here, let the vanilla behaviour take over
-            }
-        }
-
         [HarmonyPatch(typeof(BlockCreator), "CreateBlock")]
         private class CHarmonyPatch_BlockCreator_CreateBlock
         {
@@ -547,21 +409,22 @@ namespace pp.RaftMods.AutoSorter
                     return;
                 }
 
-                Get.Broadcast(new CDTO(EStorageRequestType.STORAGE_DATA_UPDATE, storage.AutoSorter.ObjectIndex) { Info = storage.Data });
+                CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_DATA_UPDATE, storage.AutoSorter.ObjectIndex) { Info = storage.Data });
             }
         }
 
         [HarmonyPatch(typeof(Inventory))]
         private class CHarmonyPatch_Inventory
         {
-            [HarmonyPrefix][HarmonyPatch("AddItem", typeof(string), typeof(int))]
-            private static void AddItem(Inventory __instance, string uniqueItemName, int amount) => Get.mi_storageManager.SetStorageInventoryDirty(__instance);
+            [HarmonyPrefix]
+            [HarmonyPatch("AddItem", typeof(string), typeof(int))]
+            private static void AddItem(Inventory __instance, string uniqueItemName, int amount) => Get.mi_storageManager.OnInventoryChanged(__instance);
 
             [HarmonyPrefix][HarmonyPatch("AddItem", typeof(string), typeof(Slot), typeof(int))]
-            private static void AddItem(Inventory __instance, string uniqueItemName, Slot slot, int amount) => Get.mi_storageManager.SetStorageInventoryDirty(__instance);
+            private static void AddItem(Inventory __instance, string uniqueItemName, Slot slot, int amount) => Get.mi_storageManager.OnInventoryChanged(__instance);
 
             [HarmonyPrefix][HarmonyPatch("AddItem", typeof(ItemInstance), typeof(bool))]
-            private static void AddItem(Inventory __instance, ItemInstance itemInstance, bool dropIfFull = true) => Get.mi_storageManager.SetStorageInventoryDirty(__instance);
+            private static void AddItem(Inventory __instance, ItemInstance itemInstance, bool dropIfFull = true) => Get.mi_storageManager.OnInventoryChanged(__instance);
 
             [HarmonyPrefix][HarmonyPatch("MoveItem")]
             private static void MoveItem(Inventory __instance, Slot slot, UnityEngine.EventSystems.PointerEventData eventData)
@@ -571,7 +434,8 @@ namespace pp.RaftMods.AutoSorter
                 Slot movedToSlot = Traverse.Create<Inventory>().Field("toSlot").GetValue<Slot>();
                 Inventory movedTo = movedToSlot != null ? Traverse.Create(movedToSlot).Field("inventory").GetValue<Inventory>() : null;
                 if (movedTo == null || movedTo == __instance) return; //if items are moved within the same inventory, ignore.
-                Get.mi_storageManager.SetStorageInventoryDirty(movedTo);
+                Get.mi_storageManager.OnInventoryChanged(movedTo);
+                Get.mi_storageManager.OnInventoryChanged(__instance);
             }
 
             [HarmonyPrefix][HarmonyPatch("SetSlotsFromRGD")]
@@ -597,7 +461,8 @@ namespace pp.RaftMods.AutoSorter
         public static string ReduceUses(string[] _args)
         {
             int c = 0;
-            foreach (var slot in Get.mi_network.GetLocalPlayer().Inventory.allSlots)
+            var network = ComponentManager<Raft_Network>.Value;
+            foreach (var slot in network.GetLocalPlayer().Inventory.allSlots)
             {
                 if (slot.HasValidItemInstance())
                 {

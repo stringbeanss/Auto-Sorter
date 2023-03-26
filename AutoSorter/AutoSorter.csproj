@@ -14,7 +14,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>AutoSorter</RootNamespace>
     <AssemblyName>AutoSorter</AssemblyName>
-    <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
@@ -46,6 +46,7 @@
     <Compile Include="DTO\SorterStorageData.cs" />
     <Compile Include="DTO\StorageRequestType.cs" />
     <None Include="LICENSE" />
+    <Compile Include="Manager\NetworkManager.cs" />
     <Compile Include="Manager\StorageManager.cs" />
     <Compile Include="UI\CUIDialog.cs" />
     <Compile Include="UI\CUISorterConfigDialog.cs" />
