@@ -21,7 +21,7 @@ namespace pp.RaftMods.AutoSorter
         private TMP_InputField mi_maxAmountInput;
 
         private Item_Base mi_representsItem;
-        private CSceneStorage mi_storage;
+        private ISceneStorage mi_storage;
 
         private MenuType mi_previousMenuType;
         private CAutoSorter mi_mod;
@@ -55,7 +55,7 @@ namespace pp.RaftMods.AutoSorter
         /// Load the storage configuration for this UI element. Setting the elements states to the configuration stored for the storage.
         /// </summary>
         /// <param name="_storage">The storage to load the item configuration state from.</param>
-        public void LoadStorage(CSceneStorage _storage)
+        public void LoadStorage(ISceneStorage _storage)
         {
             mi_storage      = _storage;
 

@@ -1,47 +1,49 @@
-﻿using HarmonyLib;
-using Newtonsoft.Json;
+﻿using AutoSorter.Messaging;
+using AutoSorter.Wrappers;
 using pp.RaftMods.AutoSorter;
-using pp.RaftMods.AutoSorter.Protocol;
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using UnityEngine;
 
 namespace AutoSorter.Manager
 {
-    public class CStorageManager
+    public class CStorageManager :  IStorageManager, 
+                                    IRecipient<InventoryChangedMessage>, 
+                                    IRecipient<InventoryDirtyMessage>
     {
         public bool HasStorages => SceneStorages.Count > 0;
-
-        private string ModDataFilePath => Path.Combine(m_modDataDirectory, "storagedata.json");
-        private string ModAdditionalDataFilePath => Path.Combine(m_modDataDirectory, "additional_storagedata.json");
-
-        /// <summary>
-        /// Storage data which is loaded and saved to disk to preserve auto-sorter configurations. 
-        /// Combines the world name and the storage data for the world.
-        /// </summary>
-        public Dictionary<string, CSorterStorageData[]> SavedSorterStorageData { get; private set; } = new Dictionary<string, CSorterStorageData[]>();
-
-        /// <summary>
-        /// Additional storage data that is loaded and saved to disk to preserve certain settings for all storages (auto-sorter or not).
-        /// </summary>
-        public Dictionary<string, CGeneralStorageData[]> SavedAdditionaStorageData { get; private set; } = new Dictionary<string, CGeneralStorageData[]>();
 
         /// <summary>
         /// All currently loaded scene storages. Is loaded on world load.
         /// </summary>
-        public Dictionary<uint, CSceneStorage> SceneStorages { get; private set; } = new Dictionary<uint, CSceneStorage>();
+        public Dictionary<uint, ISceneStorage> SceneStorages { get; private set; } = new Dictionary<uint, ISceneStorage>();
 
-        private readonly Queue<CSceneStorage> mi_registerQueuedStorages = new Queue<CSceneStorage>();
-        private readonly Queue<CSceneStorage> mi_unregisterQueuedStorages = new Queue<CSceneStorage>();
-        private readonly string m_modDataDirectory;
+        private readonly Queue<ISceneStorage> mi_registerQueuedStorages = new Queue<ISceneStorage>();
+        private readonly Queue<ISceneStorage> mi_unregisterQueuedStorages = new Queue<ISceneStorage>();
         private bool mi_deferStorageRegister;
 
-        public CStorageManager(string _modDataDirectory)
+        private readonly IAutoSorter mi_mod;
+        private readonly IStorageDataManager mi_storageData;
+        private readonly IItemManager mi_itemManager;
+        private readonly IASLogger mi_logger;
+        private readonly IRaftNetwork mi_network;
+
+        public CStorageManager(
+            IAutoSorter _mod, 
+            IStorageDataManager _storageData, 
+            IItemManager _itemManager,
+            IRaftNetwork _network,
+            IASLogger _logger)
         {
-            m_modDataDirectory = _modDataDirectory;
+            mi_mod = _mod;
+            mi_storageData = _storageData;
+            mi_itemManager = _itemManager;
+            mi_network = _network;
+            mi_logger = _logger;
+
+            Messenger.Default.Register<InventoryChangedMessage>(this);
+            Messenger.Default.Register<InventoryDirtyMessage>(this);
         }
 
         public IEnumerator UpdateStorages()
@@ -60,24 +62,12 @@ namespace AutoSorter.Manager
             FlushStorageQueues();
         }
 
-        public void LoadStorageData()
-        {
-            LoadSorterStorageData();
-            LoadAdditionalStorageData();
-        }
-
-        public void SaveStorageData()
-        {
-            SaveSorterStorageData();
-            SaveAdditionalStorageData();
-        }
-
         public void Cleanup()
         {
             //undo all changes to the scene
             foreach(var storage in SceneStorages.Values)
             {
-                Component.DestroyImmediate(storage.AutoSorter);
+                storage.AutoSorter.DestroyImmediate();
             }
             SceneStorages.Clear();
 
@@ -85,56 +75,83 @@ namespace AutoSorter.Manager
             mi_unregisterQueuedStorages.Clear();
         }
 
-        public void RegisterStorage(Storage_Small _storage)
+        public void RegisterStorage(IStorageSmall _storage)
         {
-            if (_storage == null) return;
+            if (_storage == null) throw new ArgumentNullException("_storage");
 
             if (SceneStorages.ContainsKey(_storage.ObjectIndex))
             {
-                CUtil.LogW($"Storage for index {_storage.ObjectIndex} has already been registered.");
+                mi_logger.LogW($"Storage for index {_storage.ObjectIndex} has already been registered.");
                 return;
             }
 
-            var sceneStorage = new CSceneStorage();
-            sceneStorage.StorageComponent = _storage;
-            sceneStorage.AutoSorter = _storage.gameObject.AddComponent<CStorageBehaviour>();
-            sceneStorage.StorageComponent.networkedIDBehaviour = sceneStorage.AutoSorter;
-            sceneStorage.AutoSorter.Load(this, sceneStorage);
+            var sceneStorage = CreateSceneStorage(_storage);
             if (mi_deferStorageRegister)
             {
                 mi_registerQueuedStorages.Enqueue(sceneStorage);
-                CUtil.LogD("Enqueued storage \"" + _storage.gameObject.name + "\" for register as we are currently running checks. Queued storages for register: " + mi_registerQueuedStorages.Count);
+                mi_logger.LogD("Enqueued storage \"" + _storage.ObjectName + "\" for register as we are currently running checks. Queued storages for register: " + mi_registerQueuedStorages.Count);
                 return;
             }
             SceneStorages.Add(_storage.ObjectIndex, sceneStorage);
-            CUtil.LogD("Registered storage \"" + _storage.gameObject.name + "\" Total storages: " + SceneStorages.Count);
+            mi_logger.LogD("Registered storage \"" + _storage.ObjectName + "\" Total storages: " + SceneStorages.Count);
         }
 
-        public void SetStorageInventoryDirty(Inventory _inventory)
+        public void SetStorageInventoryDirty(IInventory _inventory)
         {
-            if (!Raft_Network.IsHost) return;
-            if (_inventory is PlayerInventory) return;
+            if (!mi_network.IsHost) return;
+            if (_inventory.Unwrap() is PlayerInventory) return;
             var storageForInventory = SceneStorages.Values.FirstOrDefault(_o => _o.AutoSorter.Inventory == _inventory);
             if (storageForInventory == null) return;
             storageForInventory.IsInventoryDirty = true;
-            CUtil.LogD($"Inventory for storage \"{storageForInventory.AutoSorter.name}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
+            mi_logger.LogD($"Inventory for storage \"{storageForInventory.StorageComponent.ObjectName}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
         }
         
-        public void OnInventoryChanged(Inventory _inventory)
+        public CSceneStorage CreateSceneStorage(IStorageSmall _storage)
+        {
+            var sceneStorage = new CSceneStorage();
+
+            if (Raft_Network.IsHost)
+            {
+                if (mi_storageData.HasSorterDataForSave(SaveAndLoad.CurrentGameFileName))
+                {
+                    var data = mi_storageData.GetSorterData(SaveAndLoad.CurrentGameFileName, _storage.ObjectIndex);
+                    if (data != null)
+                    {
+                        sceneStorage.Data = data;
+                    }
+                }
+                if (mi_storageData.HasStorageDataForSave(SaveAndLoad.CurrentGameFileName))
+                {
+                    var additionalData = mi_storageData.GetStorageData(SaveAndLoad.CurrentGameFileName, _storage.ObjectIndex);
+                    if (additionalData != null)
+                    {
+                        sceneStorage.AdditionalData = additionalData;
+                    }
+                }
+            }
+
+            sceneStorage.StorageComponent = _storage;
+            sceneStorage.AutoSorter = _storage.AddComponent<CStorageBehaviour>();
+            sceneStorage.StorageComponent.SetNetworkIdBehaviour(sceneStorage.AutoSorter);
+            sceneStorage.AutoSorter.Load(mi_mod, this, mi_itemManager, mi_network, sceneStorage);
+
+            return sceneStorage;
+        }
+
+        public void OnInventoryChanged(IInventory _inventory)
         {
             if (_inventory is PlayerInventory) return;
             var storageForInventory = SceneStorages.Values.FirstOrDefault(_o => _o.AutoSorter.Inventory == _inventory);
             if (storageForInventory == null) return;
-
             if (Raft_Network.IsHost)
             {
                 storageForInventory.IsInventoryDirty = true;
-                CUtil.LogD($"Inventory for storage \"{storageForInventory.AutoSorter.name}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
+                mi_logger.LogD($"Inventory for storage \"{storageForInventory.ObjectName}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
             }
             else
             {
                 CNetwork.BroadcastInventoryState(storageForInventory.AutoSorter);
-                CUtil.LogD($"Inventory for storage \"{storageForInventory.AutoSorter.name}\"({storageForInventory.ObjectIndex}) changed.");
+                mi_logger.LogD($"Inventory for storage \"{storageForInventory.ObjectName}\"({storageForInventory.ObjectIndex}) changed.");
             }
         }
 
@@ -142,7 +159,7 @@ namespace AutoSorter.Manager
         {
             if (mi_registerQueuedStorages.Count > 0)
             {
-                CUtil.LogD("Registering " + mi_registerQueuedStorages.Count + " queued storages now.");
+                mi_logger.LogD("Registering " + mi_registerQueuedStorages.Count + " queued storages now.");
                 while (mi_registerQueuedStorages.Count > 0)
                 {
                     var storage = mi_registerQueuedStorages.Dequeue();
@@ -151,7 +168,7 @@ namespace AutoSorter.Manager
             }
             if (mi_unregisterQueuedStorages.Count > 0)
             {
-                CUtil.LogD("Unregistering " + mi_unregisterQueuedStorages.Count + " queued storages now.");
+                mi_logger.LogD("Unregistering " + mi_unregisterQueuedStorages.Count + " queued storages now.");
                 while (mi_unregisterQueuedStorages.Count > 0)
                 {
                     UnregisterStorage(mi_unregisterQueuedStorages.Dequeue());
@@ -159,22 +176,22 @@ namespace AutoSorter.Manager
             }
         }
 
-        public CSceneStorage GetStorageByIndex(uint _objectIndex)
+        public ISceneStorage GetStorageByIndex(uint _objectIndex)
         {
             if (!SceneStorages.ContainsKey(_objectIndex))
             {
-                CUtil.LogW($"Tried to get storage for index {_objectIndex} which could not be found.");
+                mi_logger.LogW($"Tried to get storage for index {_objectIndex} which could not be found.");
                 return null;
             }
             return SceneStorages[_objectIndex];
         }
 
-        public void UnregisterStorage(CSceneStorage _storage)
+        public void UnregisterStorage(ISceneStorage _storage)
         {
             if (mi_deferStorageRegister)
             {
                 mi_unregisterQueuedStorages.Enqueue(_storage);
-                CUtil.LogD("Enqueued storage \"" + _storage.StorageComponent.gameObject.name + "\" for unregister as we are currently running checks. Queued storages for unregister: " + mi_unregisterQueuedStorages.Count);
+                mi_logger.LogD("Enqueued storage \"" + _storage.StorageComponent.ObjectName + "\" for unregister as we are currently running checks. Queued storages for unregister: " + mi_unregisterQueuedStorages.Count);
                 return;
             }
 
@@ -182,141 +199,14 @@ namespace AutoSorter.Manager
 
             if (SceneStorages != null)
             {
-                CUtil.LogD("Unregistered storage \"" + (!_storage.StorageComponent ? "UNKNOWN (storage was destroyed)" : _storage.StorageComponent.gameObject.name) + "\" Total storages: " + (SceneStorages?.Count.ToString() ?? "No storages"));
+                mi_logger.LogD("Unregistered storage \"" + (_storage.StorageComponent == null ? "UNKNOWN (storage was destroyed)" : _storage.StorageComponent.ObjectName) + "\" Total storages: " + (SceneStorages?.Count.ToString() ?? "No storages"));
             }
         }
 
-        private void LoadSorterStorageData()
-        {
-            try
-            {
-                if (!File.Exists(ModDataFilePath)) return;
+        public void Receive(InventoryChangedMessage _message)
+            => OnInventoryChanged(_message.Inventory);
 
-                CSorterStorageData[] data = JsonConvert.DeserializeObject<CSorterStorageData[]>(File.ReadAllText(ModDataFilePath)) ?? throw new Exception("De-serialisation failed.");
-                SavedSorterStorageData = data
-                    .Where(_o => !string.IsNullOrEmpty(_o.SaveName))
-                    .GroupBy(_o => _o.SaveName)
-                    .ToDictionary(_o => _o.Key, _o => _o.ToArray());
-
-                foreach (var allStorageData in SavedSorterStorageData)
-                {
-                    foreach (var storageData in allStorageData.Value)
-                    {
-                        storageData.OnAfterDeserialize();
-                    }
-                }
-            }
-            catch (System.Exception _e)
-            {
-                CUtil.LogW("Failed to load saved mod data: " + _e.Message + ". Storage data wont be loaded.");
-                CUtil.LogD(_e.StackTrace);
-                SavedSorterStorageData = new Dictionary<string, CSorterStorageData[]>();
-            }
-        }
-
-        private void SaveSorterStorageData()
-        {
-            try
-            {
-                if (SceneStorages == null || SceneStorages.Count == 0) return;
-
-                if (File.Exists(ModDataFilePath))
-                {
-                    File.Delete(ModDataFilePath);
-                }
-
-                if (SavedSorterStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
-                {
-                    SavedSorterStorageData.Remove(SaveAndLoad.CurrentGameFileName);
-                }
-
-                foreach (var storage in SceneStorages)
-                {
-                    storage.Value.Data?.OnBeforeSerialize();
-                }
-
-                SavedSorterStorageData.Add(
-                    SaveAndLoad.CurrentGameFileName,
-                    SceneStorages
-                        .Where(_o => _o.Value.AutoSorter && _o.Value.IsUpgraded)
-                        .Select(_o => _o.Value.Data)
-                        .ToArray());
-
-                File.WriteAllText(
-                    ModDataFilePath,
-                    JsonConvert.SerializeObject(
-                        SavedSorterStorageData.SelectMany(_o => _o.Value).ToArray(),
-                        Formatting.None,
-                        new JsonSerializerSettings()
-                        {
-                            DefaultValueHandling = DefaultValueHandling.Ignore
-                        }) ?? throw new System.Exception("Failed to serialize"));
-            }
-            catch (System.Exception _e)
-            {
-                CUtil.LogW("Failed to save mod data: " + _e.Message + ". Storage data wont be saved.");
-                CUtil.LogD(_e.StackTrace);
-            }
-        }
-
-        private void LoadAdditionalStorageData()
-        {
-            try
-            {
-                if (!File.Exists(ModAdditionalDataFilePath)) return;
-
-                CGeneralStorageData[] data = JsonConvert.DeserializeObject<CGeneralStorageData[]>(File.ReadAllText(ModAdditionalDataFilePath)) ?? throw new System.Exception("De-serialisation failed.");
-                SavedAdditionaStorageData = data
-                    .GroupBy(_o => _o.SaveName)
-                    .Select(_o => new KeyValuePair<string, CGeneralStorageData[]>(_o.Key, _o.ToArray()))
-                    .ToDictionary(_o => _o.Key, _o => _o.Value);
-            }
-            catch (System.Exception _e)
-            {
-                CUtil.LogW("Failed to load additional saved mod data: " + _e.Message + ". Storage data wont be loaded.");
-                SavedAdditionaStorageData = new Dictionary<string, CGeneralStorageData[]>();
-                CUtil.LogD(_e.StackTrace);
-            }
-        }
-
-        private void SaveAdditionalStorageData()
-        {
-            try
-            {
-                if (SceneStorages == null || SceneStorages.Count == 0) return;
-
-                if (File.Exists(ModAdditionalDataFilePath))
-                {
-                    File.Delete(ModAdditionalDataFilePath);
-                }
-
-                if (SavedAdditionaStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
-                {
-                    SavedAdditionaStorageData.Remove(SaveAndLoad.CurrentGameFileName);
-                }
-
-                SavedAdditionaStorageData.Add(
-                    SaveAndLoad.CurrentGameFileName,
-                    SceneStorages
-                        .Where(_o => _o.Value.AdditionalData != null)
-                        .Select(_o => _o.Value.AdditionalData)
-                        .ToArray());
-
-                File.WriteAllText(
-                    ModAdditionalDataFilePath,
-                    JsonConvert.SerializeObject(
-                        SavedAdditionaStorageData.SelectMany(_o => _o.Value).ToArray(),
-                        Formatting.None,
-                        new JsonSerializerSettings()
-                        {
-                            DefaultValueHandling = DefaultValueHandling.Ignore
-                        }) ?? throw new System.Exception("Failed to serialize"));
-            }
-            catch (System.Exception _e)
-            {
-                CUtil.LogW("Failed to save additional mod data: " + _e.Message + ". Storage data wont be saved.");
-                CUtil.LogD(_e.StackTrace);
-            }
-        }
+        public void Receive(InventoryDirtyMessage _message)
+            => SetStorageInventoryDirty(_message.Inventory);
     }
 }

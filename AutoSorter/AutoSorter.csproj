@@ -14,7 +14,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>AutoSorter</RootNamespace>
     <AssemblyName>AutoSorter</AssemblyName>
-    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
@@ -27,6 +27,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <GenerateSerializationAssemblies>Off</GenerateSerializationAssemblies>
+    <PlatformTarget>x86</PlatformTarget>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -37,6 +38,26 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Abstraction\Interfaces\IRaftNetwork.cs" />
+    <Compile Include="Abstraction\Interfaces\IRemovePlaceable.cs" />
+    <Compile Include="Abstraction\Interfaces\IRGDSlot.cs" />
+    <Compile Include="Abstraction\Interfaces\IRaftStorageManager.cs" />
+    <Compile Include="Abstraction\Interfaces\IBlock.cs" />
+    <Compile Include="Abstraction\Wrappers\RaftNetworkWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\RemovePlaceableWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\RGDSlotWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\RaftStorageManagerWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\BlockSmallWrapper.cs" />
+    <Compile Include="Behaviours\ISorterBehaviour.cs" />
+    <Compile Include="DTO\ISceneStorage.cs" />
+    <Compile Include="IAutoSorter.cs" />
+    <Compile Include="IOC\InjectionException.cs" />
+    <Compile Include="IOC\IDependencyBinder.cs" />
+    <Compile Include="IOC\Dependencies.cs" />
+    <Compile Include="Manager\IStorageManager.cs" />
+    <Compile Include="Manager\IStorageDataManager.cs" />
+    <Compile Include="Abstraction\Interfaces\IStorageSmall.cs" />
+    <Compile Include="Abstraction\Wrappers\StorageSmallWrapper.cs" />
     <Compile Include="AutoSorter.cs" />
     <Compile Include="Behaviours\StorageBehaviour.cs" />
     <Compile Include="Config\ModConfig.cs" />
@@ -45,13 +66,45 @@
     <Compile Include="DTO\GeneralStorageData.cs" />
     <Compile Include="DTO\SorterStorageData.cs" />
     <Compile Include="DTO\StorageRequestType.cs" />
+    <Compile Include="Abstraction\Interfaces\IItemManager.cs" />
+    <Compile Include="Abstraction\Interfaces\INetworkPlayer.cs" />
+    <Compile Include="Abstraction\Interfaces\IItemInventorySettings.cs" />
+    <Compile Include="Abstraction\Interfaces\IInventory.cs" />
+    <Compile Include="Abstraction\Interfaces\IItemInstance.cs" />
+    <Compile Include="Abstraction\Interfaces\IItemBase.cs" />
+    <Compile Include="Abstraction\WrapperExtensions.cs" />
+    <Compile Include="Abstraction\Wrappers\IItemManagerWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\PlayerInventoryWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\NetworkPlayerWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\ItemInventorySettingsWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\ItemBaseWraper.cs" />
+    <Compile Include="Abstraction\Wrappers\ItemInstanceWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\SlotWrapper.cs" />
+    <Compile Include="Abstraction\Wrappers\InventoryWrapper.cs" />
+    <Compile Include="Abstraction\Interfaces\ISlot.cs" />
     <None Include="LICENSE" />
     <Compile Include="Manager\NetworkManager.cs" />
+    <Compile Include="Manager\StorageDataManager.cs" />
+    <Compile Include="Manager\ConfigManager.cs" />
     <Compile Include="Manager\StorageManager.cs" />
+    <Compile Include="Messages\CreateBlockMessage.cs" />
+    <Compile Include="Messages\CloseStorageMessage.cs" />
+    <Compile Include="Messages\PickupBlockMessage.cs" />
+    <Compile Include="Messages\OpenStorageMessage.cs" />
+    <Compile Include="Messages\InventoryDirtyMessage.cs" />
+    <Compile Include="Messages\InventoryChangedMessage.cs" />
+    <Compile Include="Messenger\Messenger.cs" />
+    <Compile Include="Patches\RemovePlaceablesPatches.cs" />
+    <Compile Include="Patches\BlockCreatorPatches.cs" />
+    <Compile Include="Patches\StorageSmallPatches.cs" />
+    <Compile Include="Patches\InventoryPatches.cs" />
     <Compile Include="UI\CUIDialog.cs" />
     <Compile Include="UI\CUISorterConfigDialog.cs" />
     <Compile Include="UI\CUISorterConfigItem.cs" />
+    <Compile Include="Util\ILogger.cs" />
+    <Compile Include="Util\Logger.cs" />
     <Compile Include="Util\Util.cs" />
+    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Properties\" />

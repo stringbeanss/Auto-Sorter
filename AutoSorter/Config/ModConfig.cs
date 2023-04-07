@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using AutoSorter.Wrappers;
+using Newtonsoft.Json;
 
 namespace pp.RaftMods.AutoSorter
 {
@@ -74,7 +75,8 @@ namespace pp.RaftMods.AutoSorter
             Debug                               = ExtraSettingsAPI_GetCheckboxState(nameof(Debug));
             ReturnItemsOnDowngradeMultiplier    = ExtraSettingsAPI_GetSliderValue(nameof(ReturnItemsOnDowngradeMultiplier));
             ChangeStorageColorOnUpgrade         = ExtraSettingsAPI_GetCheckboxState(nameof(ChangeStorageColorOnUpgrade));
-            CUtil.LogD("Settings reload!\n" + this);
+            var logger = LoggerFactory.Default.GetLogger();
+            logger.LogD("Settings reload!\n" + this);
         }
 
         public override string ToString()
@@ -99,7 +101,7 @@ ChangeColor: {ChangeStorageColorOnUpgrade}";
         public int Amount;
 
         [JsonIgnore]
-        public Item_Base Item;
+        public IItemBase Item;
 
         public UpgradeCost() { }
         public UpgradeCost(string _name, int _amount)
@@ -113,16 +115,17 @@ ChangeColor: {ChangeStorageColorOnUpgrade}";
             return new Cost(ItemManager.GetItemByName(Name), Amount);
         }
 
-        public void Load()
+        public void Load(IItemManager _itemManager)
         {
-            Item = ItemManager.GetItemByName(Name);
-            if (!Item)
+            Item = _itemManager.GetItemByName(Name);
+            var logger = LoggerFactory.Default.GetLogger();
+            if (Item == null)
             {
-                CUtil.LogW("Specified item \"" + Name + "\" in the config upgrade costs could not be found. Please check your config file. The item will be ignored.");
+                logger.LogW($"Specified item \"{Name}\" in the config upgrade costs could not be found. Please check your config file. The item will be ignored.");
             }
             if(Amount <= 0)
             {
-                CUtil.LogW("Item amount on item \"" + Name + "\" in the config upgrade costs is invalid. Please check your config file.");
+                logger.LogW($"Item amount on item \"{Name}\" in the config upgrade costs is invalid. Please check your config file.");
             }
         }
 

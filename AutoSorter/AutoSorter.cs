@@ -2,11 +2,12 @@
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Web;
+using AutoSorter.IOC;
 using AutoSorter.Manager;
+using AutoSorter.Messaging;
+using AutoSorter.Wrappers;
 using HarmonyLib;
 using HMLLibrary;
-using Newtonsoft.Json;
 using pp.RaftMods.AutoSorter.Protocol;
 using RaftModLoader;
 using UnityEngine;
@@ -17,7 +18,12 @@ namespace pp.RaftMods.AutoSorter
     /// Main mod class handles harmony injections, saving/loading of storage and config data, loading of the mod asset bundle and registering/loading storages into the mods data structure.
     /// Also holds and runs the coroutine used to check auto-sorters and storages for item transfer.
     /// </summary>
-    public class CAutoSorter : Mod
+    public class CAutoSorter : Mod, 
+                                IAutoSorter,
+                                IRecipient<OpenStorageMessage>,
+                                IRecipient<PickupBlockMessage>,
+                                IRecipient<CreateBlockMessage>,
+                                IRecipient<CloseStorageMessage>
     {
         /// <summary>
         /// Explicitly typed mod instance for static access.
@@ -36,14 +42,7 @@ namespace pp.RaftMods.AutoSorter
         private const string UI_HELP_TEXT_PATH                      = "Assets/Config/help.txt";
 
         private string ModDataDirectory     => Path.Combine(Application.persistentDataPath, "Mods", MOD_NAME);
-        private string ModConfigFilePath    => Path.Combine(ModDataDirectory, "config.json");
 
-        private static CModConfig ExtraSettingsAPI_Settings = new CModConfig();
-
-        /// <summary>
-        /// Mod configuration object. Loaded from disk on mod load. 
-        /// </summary>
-        public static CModConfig Config { get => ExtraSettingsAPI_Settings; private set { ExtraSettingsAPI_Settings = value; } }
         /// <summary>
         /// The help text displayed when first opening the auto-sorter UI or whenever the help button is clicked.
         /// Is loaded from the mods asset bundle.
@@ -61,6 +60,7 @@ namespace pp.RaftMods.AutoSorter
         private Harmony mi_harmony;
 
         private Coroutine mi_chestRoutineHandle;
+        private Coroutine mi_deferConfigUIRoutineHandle;
         private bool mi_checkChests;
         private double mi_lastCheckDurationSeconds;
 
@@ -69,7 +69,10 @@ namespace pp.RaftMods.AutoSorter
         private GameObject mi_uiRoot;
         private CUISorterConfigDialog mi_configDialog;
 
-        private CStorageManager mi_storageManager;
+        private IASLogger mi_logger;
+        private IStorageManager mi_storageManager;
+
+        private Dependencies mi_dependencies = new Dependencies();
 
         #region ENGINE_CALLBACKS
         /// <summary>
@@ -80,23 +83,25 @@ namespace pp.RaftMods.AutoSorter
             if (Get)
             {
                 DestroyImmediate(Get);
-                CUtil.LogW("Mod has been loaded twice. Destroying old mod instance.");
+                Debug.LogWarning("Autosorter mod has been loaded twice. Destroying old mod instance.");
             }
             Get = this;
 
-            LoadConfig();
-
             mi_harmony = new Harmony(MOD_NAMESPACE);
             mi_harmony.PatchAll(Assembly.GetExecutingAssembly());
+
+            LoadBinds();
+            LoadDependencies();
+
             if (mi_bundle == null)
             {
-                CUtil.LogD("Loading mod bundle @ " + ASSET_PAYLOAD_PATH + "...");
+                mi_logger.LogD("Loading mod bundle @ " + ASSET_PAYLOAD_PATH + "...");
                 AssetBundleCreateRequest request = AssetBundle.LoadFromMemoryAsync(GetEmbeddedFileBytes(ASSET_PAYLOAD_PATH));
                 yield return request;
                 mi_bundle = request.assetBundle;
                 if (!mi_bundle)
                 {
-                    CUtil.LogE("Failed to load embedded bundle. This usually happens if you load two instances of the auto sorter mod.");
+                    mi_logger.LogE("Failed to load embedded bundle. This usually happens if you load two instances of the auto sorter mod.");
                     DestroyImmediate(Get);
                     yield break;
                 }
@@ -105,25 +110,22 @@ namespace pp.RaftMods.AutoSorter
             HelpText = mi_bundle.LoadAsset<TextAsset>(UI_HELP_TEXT_PATH)?.text?.Trim();
             if (string.IsNullOrEmpty(HelpText))
             {
-                CUtil.LogW("Help text file could not be read.");
+                mi_logger.LogW("Help text file could not be read.");
                 HelpText = "Failed to load!";
             }
 
             Sounds = ComponentManager<SoundManager>.Value;
             if (!Sounds)
             {
-                CUtil.LogW("Failed to get sound manager on mod load.");
+                mi_logger.LogW("Failed to get sound manager on mod load.");
             }
 
-            mi_storageManager = new CStorageManager(ModDataDirectory);
-            mi_storageManager.LoadStorageData();
-
-            CUtil.Log($"{MOD_NAME} v. {VERSION} loaded.");
+            mi_logger.Log($"{MOD_NAME} v. {VERSION} loaded.");
         }
 
         private void OnDestroy()
         {
-            CUtil.LogD($"Destroying {MOD_NAME}...");
+            mi_logger.LogD($"Destroying {MOD_NAME}...");
             mi_checkChests = false;
             StopAllCoroutines();
             mi_storageManager.Cleanup();
@@ -148,7 +150,7 @@ namespace pp.RaftMods.AutoSorter
             mi_uiRoot = null;
 
             Get = null;
-            CUtil.LogD($"Destroyed {MOD_NAME}!");
+            mi_logger.LogD($"Destroyed {MOD_NAME}!");
         }
         #endregion
 
@@ -170,7 +172,7 @@ namespace pp.RaftMods.AutoSorter
                 mi_checkChests = true;
                 mi_chestRoutineHandle = StartCoroutine(Run());
             }
-            CUtil.LogD($"World \"{SaveAndLoad.CurrentGameFileName}\" loaded.");
+            mi_logger.LogD($"World \"{SaveAndLoad.CurrentGameFileName}\" loaded.");
         }
 
         /// <summary>
@@ -193,63 +195,34 @@ namespace pp.RaftMods.AutoSorter
         public override void WorldEvent_WorldSaved()
         {
             base.WorldEvent_WorldSaved();
-            mi_storageManager.SaveStorageData();
+            var storageDataManager = mi_dependencies.Resolve<IStorageDataManager>();
+            storageDataManager.SaveStorageData(mi_storageManager.SceneStorages.Values);
         }
         #endregion
 
-        public void SaveConfig()
+        public virtual void LoadBinds()
         {
-            try
-            {
-                if (!Directory.Exists(ModDataDirectory))
-                {
-                    Directory.CreateDirectory(ModDataDirectory);
-                }
-
-                if (Config == null)
-                {
-                    Config = new CModConfig();
-                }
-
-                CUtil.LogD("Save configuration.");
-                File.WriteAllText(
-                    ModConfigFilePath,
-                    JsonConvert.SerializeObject(
-                        Config,
-                        Formatting.Indented,
-                        new JsonSerializerSettings()
-                        {
-                            DefaultValueHandling = DefaultValueHandling.Include
-                        }) ?? throw new System.Exception("Failed to serialize"));
-            }
-            catch (System.Exception _e)
-            {
-                CUtil.LogW("Failed to save mod configuration: " + _e.Message);
-                CUtil.LogD(_e.StackTrace);
-            }
+            mi_dependencies.Bind<IAutoSorter>().ToConstant(this);
+            mi_dependencies.Bind<IASLogger>().ToConstant(LoggerFactory.Default.GetLogger());
+            mi_dependencies.Bind<IStorageDataManager>().ToConstant(new CStorageDataManager(ModDataDirectory));
+            mi_dependencies.Bind<CConfigManager>().ToConstant(new CConfigManager(ModDataDirectory));
+            mi_dependencies.Bind<IStorageManager, CStorageManager>().AsSingleton();
+            mi_dependencies.Bind<IItemManager, CItemManagerWrapper>().AsSingleton();
+            mi_dependencies.Bind<IRaftNetwork>().ToConstant(ComponentManager<Raft_Network>.Value.Wrap());
         }
 
-        private void LoadConfig()
+        public virtual void LoadDependencies()
         {
-            try
-            {
-                if (!File.Exists(ModConfigFilePath))
-                {
-                    SaveConfig();
-                    return;
-                }
-                CUtil.LogD("Load configuration.");
-                Config = JsonConvert.DeserializeObject<CModConfig>(File.ReadAllText(ModConfigFilePath)) ?? throw new System.Exception("De-serialisation failed.");
-                if(Config.UpgradeCosts != null)
-                {
-                    foreach (var cost in Config.UpgradeCosts) cost.Load();
-                }
-            }
-            catch (System.Exception _e)
-            {
-                CUtil.LogW("Failed to load mod configuration: " + _e.Message + ". Check your configuration file.");
-                CUtil.LogD(_e.StackTrace);
-            }
+            mi_logger = mi_dependencies.Resolve<IASLogger>();
+            mi_storageManager = mi_dependencies.Resolve<IStorageManager>();
+
+            var storageDataManager = mi_dependencies.Resolve<IStorageDataManager>();
+            storageDataManager.LoadStorageData();
+
+            var configManager = mi_dependencies.Resolve<CConfigManager>();
+            configManager.LoadConfig();
+
+            LoggerFactory.Default.Debug = CConfigManager.Config.Debug;
         }
 
         private IEnumerator Run()
@@ -271,9 +244,9 @@ namespace pp.RaftMods.AutoSorter
 
                     mi_lastCheckDurationSeconds = (System.DateTime.UtcNow - now).TotalSeconds;
                 }
-                if (mi_lastCheckDurationSeconds < Config.CheckIntervalSeconds)
+                if (mi_lastCheckDurationSeconds < CConfigManager.Config.CheckIntervalSeconds)
                 {
-                    yield return new WaitForSeconds((float)(Config.CheckIntervalSeconds - mi_lastCheckDurationSeconds));
+                    yield return new WaitForSeconds((float)(CConfigManager.Config.CheckIntervalSeconds - mi_lastCheckDurationSeconds));
                 }
 
                 yield return new WaitForEndOfFrame();
@@ -282,24 +255,24 @@ namespace pp.RaftMods.AutoSorter
         
         private void LoadUI()
         {
-            CUtil.LogD("Loading auto-sorter UI...");
+            mi_logger.LogD("Loading auto-sorter UI...");
             GameObject rootAsset = mi_bundle.LoadAsset<GameObject>(UI_CONFIG_DIALOG_PREFAB_PATH);
             if (!rootAsset)
             {
-                CUtil.LogE("Failed to load UI root asset from bundle.");
+                mi_logger.LogE("Failed to load UI root asset from bundle.");
                 return;
             }
             GameObject itemAsset = mi_bundle.LoadAsset<GameObject>(UI_CONFIG_DIALOG_ITEM_PREFAB_PATH);
             if (!rootAsset)
             {
-                CUtil.LogE("Failed to load UI item asset from bundle.");
+                mi_logger.LogE("Failed to load UI item asset from bundle.");
                 return;
             }
 
             var canvasRoot = GameObject.Find(UI_CANVAS_ROOT);
             if (!canvasRoot)
             {
-                CUtil.LogE("Failed to load rafts UI canvases anchor. The mod might be out of date.");
+                mi_logger.LogE("Failed to load rafts UI canvases anchor. The mod might be out of date.");
                 return;
             }
 
@@ -312,14 +285,49 @@ namespace pp.RaftMods.AutoSorter
 
             Transform configDialogRoot = mi_uiRoot.transform.Find("ConfigDialog");
             mi_configDialog = configDialogRoot.gameObject.AddComponent<CUISorterConfigDialog>();
-            mi_configDialog.Load(this, itemAsset);
+            mi_configDialog.Load(this, mi_dependencies.Resolve<CConfigManager>(), itemAsset);
 
             Transform dialogRoot = mi_uiRoot.transform.Find("Dialog");
             Dialog = dialogRoot.gameObject.AddComponent<CUIDialog>();
-            CUtil.LogD("Auto-sorter UI loaded!");
+            mi_logger.LogD("Auto-sorter UI loaded!");
         }
 
-        private void OnBlockCreated(Storage_Small _storage)
+        private IEnumerator WaitAndShowUI(ISceneStorage _storage)
+        {
+            while (mi_configDialog == null) yield return new WaitForEndOfFrame();
+            if (!_storage.StorageComponent.IsOpen) yield break;
+            mi_configDialog.Show(_storage);
+        }
+
+        public void ReimburseConstructionCosts(IItemManager _itemManager, INetworkPlayer _player, bool _applyDowngradeMultiplier)
+        {
+            int toAdd;
+            foreach (var cost in CConfigManager.Config.UpgradeCosts)
+            {
+                IItemBase item = _itemManager.GetItemByName(cost.Name);
+                if (item == null)
+                {
+                    mi_logger.LogW($"Configured reimbursement item \"{cost.Name}\" was not found. Please check your \"{nameof(CModConfig.UpgradeCosts)}\" setting in the config file and make sure the items in there exist in your raft.");
+                    continue;
+                }
+                if (cost.Amount < 0)
+                {
+                    mi_logger.LogW($"Invalid amount configured for item \"{cost.Name}\" in the \"{nameof(CModConfig.UpgradeCosts)}\" of your config file. Make sure you set the amount to a value >0.");
+                    continue;
+                }
+                toAdd = (int)(cost.Amount * (_applyDowngradeMultiplier ? CConfigManager.Config.ReturnItemsOnDowngradeMultiplier : 1f));
+                if (toAdd > 0)
+                {
+                    int added = CUtil.StackedAddInventory(_player.Inventory, item, toAdd);
+                    if (added < toAdd)
+                    {
+                        _player.Inventory.DropItem(item, toAdd - added);
+                    }
+                }
+            }
+        }
+        
+        private void OnBlockCreated(IStorageSmall _storage)
         {
             if (Get == null) return; //mod is being unloaded
 
@@ -328,119 +336,75 @@ namespace pp.RaftMods.AutoSorter
             mi_storageManager.RegisterStorage(_storage);
         }
 
-        private IEnumerator WaitAndShowUI(CSceneStorage _storage)
+        private void OnOpenStorage(IStorageSmall _storage, INetworkPlayer _player)
         {
-            while (mi_configDialog == null) yield return new WaitForEndOfFrame();
-            if (!_storage.StorageComponent.IsOpen) yield break;
-            mi_configDialog.Show(_storage);
+            if (_player == null || !_player.IsLocalPlayer) return;
+
+            var storage = mi_storageManager.GetStorageByIndex(_storage.ObjectIndex);
+            if (storage == null)
+            {
+                mi_logger.LogW("Failed to find matching storage on storage open. This is a bug and should be reported.");
+                return;
+            }
+
+            if (mi_configDialog == null) //If the UI is not fully loaded directly after entering the scene, make sure we wait until its available before showing it to the user.
+            {
+                if (mi_deferConfigUIRoutineHandle != null)
+                {
+                    StopCoroutine(mi_deferConfigUIRoutineHandle);
+                }
+                mi_deferConfigUIRoutineHandle = StartCoroutine(WaitAndShowUI(storage));
+                return;
+            }
+
+            mi_configDialog.Show(storage);
         }
 
+        private void OnCloseStorage(IStorageSmall _storage, INetworkPlayer _player)
+        {
+            if (_player == null || !_player.IsLocalPlayer) return;
+
+            mi_configDialog?.Hide();
+
+            var storage = mi_storageManager.GetStorageByIndex(_storage.ObjectIndex);
+            if (storage == null)
+            {
+                mi_logger.LogW("Failed to find matching storage on storage close. This is a bug and should be reported.");
+                return;
+            }
+
+            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_DATA_UPDATE, storage.StorageComponent.ObjectIndex) { Info = storage.Data });
+        }
+
+        private void OnPickupBlock(IRemovePlaceable _placeable, IBlock _block)
+        {
+            if (!(_block is Storage_Small)) return;
+            var storage = Get.mi_storageManager.GetStorageByIndex(_block.ObjectIndex);
+            if (storage == null)
+            {
+                mi_logger.LogW("Failed to find matching storage on storage pickup. This is a bug and should be reported.");
+                return;
+            }
+            if (!storage.IsUpgraded) return;
+            var pickupPlayer = Traverse.Create(((CRemovePlaceableWrapper)_placeable).Unwrap()).Field("playerNetwork").GetValue<Network_Player>();
+            if (pickupPlayer == null || !pickupPlayer.IsLocalPlayer)
+                return;
+            ReimburseConstructionCosts(mi_dependencies.Resolve<IItemManager>(), pickupPlayer.Wrap(), false);
+        }
+        
+        public void Receive(OpenStorageMessage _message)
+            => OnOpenStorage(_message.Storage, _message.Player);
+
+        public void Receive(PickupBlockMessage _message)
+            => OnPickupBlock(_message.Placeable, _message.Block);
+
+        public void Receive(CreateBlockMessage _message)
+            => OnBlockCreated(_message.Storage);
+
+        public void Receive(CloseStorageMessage _message)
+            => OnCloseStorage(_message.Storage, _message.Player);
         #region PATCHES
-        [HarmonyPatch(typeof(BlockCreator), "CreateBlock")]
-        private class CHarmonyPatch_BlockCreator_CreateBlock
-        {
-            //Intercept create block method so we can check each created block and register it if it is a storage
-            [HarmonyPostfix]
-            private static void CreateBlock(BlockCreator __instance, Block __result) => Get.OnBlockCreated(__result as Storage_Small);
-        }
 
-        [HarmonyPatch(typeof(RemovePlaceables), "PickupBlock")]
-        private class CHarmonyPatch_RemovePlaceables_PickupBlock
-        {
-            [HarmonyPrefix]
-            private static void PickupBlock(RemovePlaceables __instance, Block block)
-            {
-                if (!(block is Storage_Small)) return;
-                var storage = Get.mi_storageManager.GetStorageByIndex(block.ObjectIndex);
-                if (storage == null)
-                {
-                    CUtil.LogW("Failed to find matching storage on storage pickup. This is a bug and should be reported.");
-                    return;
-                }
-                if (!storage.IsUpgraded) return;
-                var pickupPlayer = Traverse.Create(__instance).Field("playerNetwork").GetValue<Network_Player>();
-                if(pickupPlayer == null || !pickupPlayer.IsLocalPlayer)
-                    return;
-                CUtil.ReimburseConstructionCosts(pickupPlayer, false);
-            }
-        }
-
-        [HarmonyPatch(typeof(Storage_Small))]
-        private class CHarmonyPatch_Storage_Small
-        {
-            private static Coroutine mi_routine;
-
-            [HarmonyPostfix][HarmonyPatch("Open")]
-            private static void Open(Storage_Small __instance, Network_Player player)
-            {
-                if (player == null || !player.IsLocalPlayer) return;
-
-                var storage = Get.mi_storageManager.GetStorageByIndex(__instance.ObjectIndex);
-                if (storage == null)
-                {
-                    CUtil.LogW("Failed to find matching storage on storage open. This is a bug and should be reported.");
-                    return;
-                }
-
-                if (Get.mi_configDialog == null) //If the UI is not fully loaded directly after entering the scene, make sure we wait until its available before showing it to the user.
-                {
-                    if (mi_routine != null)
-                    {
-                        Get.StopCoroutine(mi_routine);
-                    }
-                    mi_routine = Get.StartCoroutine(Get.WaitAndShowUI(storage));
-                    return;
-                }
-
-                Get.mi_configDialog.Show(storage);
-            }
-
-            [HarmonyPostfix][HarmonyPatch("Close")]
-            private static void Close(Storage_Small __instance, Network_Player player)
-            {
-                if (player == null || !player.IsLocalPlayer) return;
-
-                Get.mi_configDialog?.Hide();
-
-                var storage = Get.mi_storageManager.GetStorageByIndex(__instance.ObjectIndex);
-                if (storage == null)
-                {
-                    CUtil.LogW("Failed to find matching storage on storage close. This is a bug and should be reported.");
-                    return;
-                }
-
-                CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_DATA_UPDATE, storage.AutoSorter.ObjectIndex) { Info = storage.Data });
-            }
-        }
-
-        [HarmonyPatch(typeof(Inventory))]
-        private class CHarmonyPatch_Inventory
-        {
-            [HarmonyPrefix]
-            [HarmonyPatch("AddItem", typeof(string), typeof(int))]
-            private static void AddItem(Inventory __instance, string uniqueItemName, int amount) => Get.mi_storageManager.OnInventoryChanged(__instance);
-
-            [HarmonyPrefix][HarmonyPatch("AddItem", typeof(string), typeof(Slot), typeof(int))]
-            private static void AddItem(Inventory __instance, string uniqueItemName, Slot slot, int amount) => Get.mi_storageManager.OnInventoryChanged(__instance);
-
-            [HarmonyPrefix][HarmonyPatch("AddItem", typeof(ItemInstance), typeof(bool))]
-            private static void AddItem(Inventory __instance, ItemInstance itemInstance, bool dropIfFull = true) => Get.mi_storageManager.OnInventoryChanged(__instance);
-
-            [HarmonyPrefix][HarmonyPatch("MoveItem")]
-            private static void MoveItem(Inventory __instance, Slot slot, UnityEngine.EventSystems.PointerEventData eventData)
-            {
-                if (slot == null || slot.IsEmpty || __instance.secondInventory == null) return; //if items are moved within the player inventory, ignore.
-
-                Slot movedToSlot = Traverse.Create<Inventory>().Field("toSlot").GetValue<Slot>();
-                Inventory movedTo = movedToSlot != null ? Traverse.Create(movedToSlot).Field("inventory").GetValue<Inventory>() : null;
-                if (movedTo == null || movedTo == __instance) return; //if items are moved within the same inventory, ignore.
-                Get.mi_storageManager.OnInventoryChanged(movedTo);
-                Get.mi_storageManager.OnInventoryChanged(__instance);
-            }
-
-            [HarmonyPrefix][HarmonyPatch("SetSlotsFromRGD")]
-            private static void SetSlotsFromRGD(Inventory __instance, RGD_Slot[] slots) => Get.mi_storageManager.SetStorageInventoryDirty(__instance);
-        }
         #endregion
 
         #region COMMANDS
@@ -452,7 +416,7 @@ namespace pp.RaftMods.AutoSorter
                     Get.mi_storageManager.SceneStorages.Count == 0 ? 
                         "No registered storages in scene." :
                         "- " + string.Join("\n- ",
-                            Get.mi_storageManager.SceneStorages.Values.Select(_o => $"\"{_o.StorageComponent.gameObject.name}\" Dirty: {_o.IsInventoryDirty} AutoSorter: {_o.IsUpgraded} " +
+                            Get.mi_storageManager.SceneStorages.Values.Select(_o => $"\"{_o.StorageComponent.ObjectName}\" Dirty: {_o.IsInventoryDirty} AutoSorter: {_o.IsUpgraded} " +
                                 $"{(_o.IsUpgraded ? $" Priority: {_o.Data.Priority} Filters: {_o.Data.Filters.Count}" : "")}" +
                                 $"{(_o.AdditionalData != null ? " Ignore: " + _o.AdditionalData.Ignore : "")}")));
         }
@@ -467,7 +431,6 @@ namespace pp.RaftMods.AutoSorter
                 if (slot.HasValidItemInstance())
                 {
                     slot.itemInstance.Uses = (int)Mathf.Ceil(slot.itemInstance.BaseItemMaxUses * 0.5f);
-                    CUtil.Log("Setting max uses of " + slot.itemInstance.UniqueName + " to " + slot.itemInstance.Uses);
                     c++;
                 }
             }

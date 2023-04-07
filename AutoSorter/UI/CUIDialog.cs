@@ -18,6 +18,12 @@ namespace pp.RaftMods.AutoSorter
         private bool mi_dialogVisible;
 
         private CAutoSorter mi_mod;
+        private readonly IASLogger mi_logger;
+
+        public CUIDialog()
+        {
+            mi_logger = LoggerFactory.Default.GetLogger();
+        }
 
         private void Awake()
         {
@@ -60,7 +66,7 @@ namespace pp.RaftMods.AutoSorter
         {
             if (mi_dialogVisible)
             {
-                CUtil.LogW("Dialog already visible. No queue implemented yet. Cannot show dialog: " + _message);
+                mi_logger.LogW("Dialog already visible. No queue implemented yet. Cannot show dialog: " + _message);
                 return;
             }
 
@@ -79,7 +85,7 @@ namespace pp.RaftMods.AutoSorter
         {
             if (mi_dialogVisible)
             {
-                CUtil.LogW("Dialog already visible. No queue implemented yet. Cannot show dialog: " + _message);
+                mi_logger.LogW("Dialog already visible. No queue implemented yet. Cannot show dialog: " + _message);
                 return;
             }
 

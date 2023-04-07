@@ -18,6 +18,7 @@ powershell "[System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compres
 rmdir /s /q "build"
 :: Build succeeded!
 
+copy AutoSorter.rmod M:\RaftDedicatedServer\RDS_Data\mods
+copy AutoSorter.rmod M:\SteamLibrary\steamapps\common\Raft\mods
 
-pause
 EXIT

@@ -1,4 +1,5 @@
-﻿using HarmonyLib;
+﻿using AutoSorter.Wrappers;
+using HarmonyLib;
 using Newtonsoft.Json;
 using pp.RaftMods.AutoSorter;
 using pp.RaftMods.AutoSorter.Protocol;
@@ -17,6 +18,8 @@ namespace AutoSorter.Manager
         private static short mi_modMessagesFloor = short.MaxValue;
         private static short mi_modMessagesCeil = short.MinValue;
 
+        private static readonly IASLogger mi_logger;
+
         static CNetwork()
         {
             foreach (EStorageRequestType m in System.Enum.GetValues(typeof(EStorageRequestType)))
@@ -24,6 +27,8 @@ namespace AutoSorter.Manager
                 mi_modMessagesFloor = (short)Mathf.Min(mi_modMessagesFloor, (short)m);
                 mi_modMessagesCeil = (short)Mathf.Max(mi_modMessagesCeil, (short)m);
             }
+
+            mi_logger = LoggerFactory.Default.GetLogger();
         }
 
         public static void Clear()
@@ -38,7 +43,7 @@ namespace AutoSorter.Manager
 
         public static void SendTo(CDTO _object, CSteamID _id)
         {
-            CUtil.LogD("Sending " + _object.Type + " to " + _id.m_SteamID + ".");
+            mi_logger.LogD("Sending " + _object.Type + " to " + _id.m_SteamID + ".");
             mi_network.SendP2P(_id, CreateCarrierDTO(_object), EP2PSend.k_EP2PSendReliable, NetworkChannel.Channel_Game);
         }
 
@@ -46,21 +51,28 @@ namespace AutoSorter.Manager
 
         public static void Broadcast(CDTO _object)
         {
-            CUtil.LogD("Broadcasting " + _object.Type + " to others.");
+            mi_logger.LogD("Broadcasting " + _object.Type + " to others.");
             mi_network.RPC(CreateCarrierDTO(_object), Target.Other, EP2PSend.k_EP2PSendReliable, NetworkChannel.Channel_Game);
         }
 
-        public static void BroadcastInventoryState(CStorageBehaviour _storageBehaviour)
+        public static void BroadcastInventoryState(ISorterBehaviour _storageBehaviour)
         {
-            CUtil.LogD("Broadcasting storage inventory change to others.");
-            mi_network.RPC(new Message_Storage_Close((Messages)EStorageRequestType.STORAGE_INVENTORY_UPDATE, _storageBehaviour.LocalPlayer.StorageManager, _storageBehaviour.SceneStorage.StorageComponent), Target.Other, EP2PSend.k_EP2PSendReliable, NetworkChannel.Channel_Game);
+            mi_logger.LogD("Broadcasting storage inventory change to others.");
+            mi_network.RPC(
+                new Message_Storage_Close(
+                    (Messages)EStorageRequestType.STORAGE_INVENTORY_UPDATE, 
+                    _storageBehaviour.LocalPlayer.StorageManager.Unwrap(), 
+                    _storageBehaviour.SceneStorage.StorageComponent.Unwrap()), 
+                    Target.Other, 
+                    EP2PSend.k_EP2PSendReliable, 
+                    NetworkChannel.Channel_Game);
         }
 
         public static void RegisterNetworkBehaviour(CStorageBehaviour _behaviour)
         {
             if (mi_registeredNetworkBehaviours.ContainsKey(_behaviour.ObjectIndex))
             {
-                CUtil.LogW("Behaviour with ID" + _behaviour.ObjectIndex + " \"" + _behaviour.name + "\" was already registered.");
+                mi_logger.LogW("Behaviour with ID" + _behaviour.ObjectIndex + " \"" + _behaviour.name + "\" was already registered.");
                 return;
             }
 
@@ -99,7 +111,7 @@ namespace AutoSorter.Manager
                     var msg = package as Message_InitiateConnection;
                     if (msg == null && inventoryUpdate == null)
                     {
-                        CUtil.LogW("Invalid auto-sorter mod message received. Make sure all connected players use the same mod version.");
+                        mi_logger.LogW("Invalid auto-sorter mod message received. Make sure all connected players use the same mod version.");
                         continue;
                     }
 
@@ -111,7 +123,7 @@ namespace AutoSorter.Manager
                         {
                             if (!mi_registeredNetworkBehaviours.ContainsKey(inventoryUpdate.storageObjectIndex))
                             {
-                                CUtil.LogW("No receiver with ID " + inventoryUpdate.storageObjectIndex + " found.");
+                                mi_logger.LogW("No receiver with ID " + inventoryUpdate.storageObjectIndex + " found.");
                                 continue;
                             }
                             mi_registeredNetworkBehaviours[inventoryUpdate.storageObjectIndex].OnInventoryUpdateReceived(inventoryUpdate);
@@ -121,13 +133,13 @@ namespace AutoSorter.Manager
                         CDTO modMessage = JsonConvert.DeserializeObject<CDTO>(msg.password);
                         if (modMessage == null)
                         {
-                            CUtil.LogW("Invalid network message received. Update the AutoSorter mod or make sure all connected players use the same version.");
+                            mi_logger.LogW("Invalid network message received. Update the AutoSorter mod or make sure all connected players use the same version.");
                             continue;
                         }
 
                         if (!mi_registeredNetworkBehaviours.ContainsKey(modMessage.ObjectIndex))
                         {
-                            CUtil.LogW("No receiver with ID " + modMessage.ObjectIndex + " found.");
+                            mi_logger.LogW("No receiver with ID " + modMessage.ObjectIndex + " found.");
                             continue;
                         }
 
@@ -136,14 +148,14 @@ namespace AutoSorter.Manager
                             modMessage.Info.OnAfterDeserialize();
                         }
 
-                        CUtil.LogD($"Received {modMessage.Type}({package.t}) message from \"{remoteID}\".");
+                        mi_logger.LogD($"Received {modMessage.Type}({package.t}) message from \"{remoteID}\".");
                         mi_registeredNetworkBehaviours[modMessage.ObjectIndex].OnNetworkMessageReceived(modMessage, remoteID);
                     }
                     catch (System.Exception _e)
                     {
-                        CUtil.LogW($"Failed to read mod network message ({package.Type}) as {(Raft_Network.IsHost ? "host" : "client")}. You or one of your fellow players might have to update the mod.");
-                        CUtil.LogD(_e.Message);
-                        CUtil.LogD(_e.StackTrace);
+                        mi_logger.LogW($"Failed to read mod network message ({package.Type}) as {(Raft_Network.IsHost ? "host" : "client")}. You or one of your fellow players might have to update the mod.");
+                        mi_logger.LogD(_e.Message);
+                        mi_logger.LogD(_e.StackTrace);
                     }
                 }
 

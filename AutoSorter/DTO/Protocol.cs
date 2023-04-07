@@ -1,5 +1,4 @@
-﻿
-namespace pp.RaftMods.AutoSorter.Protocol
+﻿namespace pp.RaftMods.AutoSorter.Protocol
 {
     /// <summary>
     /// Objects of this DTO class are transferred to other clients to inform the about auto-sorter config changes or upgrades of storages.

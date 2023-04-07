@@ -1,4 +1,5 @@
 ﻿using AutoSorter.Manager;
+using AutoSorter.Wrappers;
 using pp.RaftMods.AutoSorter.Protocol;
 using System.Collections;
 using System.Collections.Generic;
@@ -52,7 +53,7 @@ namespace pp.RaftMods.AutoSorter
 
         private Dictionary<int, CUISorterConfigItem> mi_itemControls = new Dictionary<int, CUISorterConfigItem>();
 
-        private CSceneStorage mi_currentStorage;
+        private ISceneStorage mi_currentStorage;
 
         private bool mi_isVisible;
         private bool mi_loaded;
@@ -65,7 +66,14 @@ namespace pp.RaftMods.AutoSorter
         private bool mi_isHidden;
 
         private CAutoSorter mi_mod;
+        private CConfigManager mi_config;
+        private readonly IASLogger mi_logger;
         private EAdditionalItemFilterType mi_additionalItemFilter;
+
+        public CUISorterConfigDialog()
+        {
+            mi_logger = LoggerFactory.Default.GetLogger();
+        }
 
         private void Awake()
         {
@@ -135,7 +143,7 @@ namespace pp.RaftMods.AutoSorter
             mi_includeButton.onClick.AddListener(new UnityEngine.Events.UnityAction(OnIncludeButtonClick));
             mi_ignoreButton.onClick.AddListener(new UnityEngine.Events.UnityAction(OnIgnoreButtonClick));
 
-            mi_upgradeOverlayText.text = "Upgrading the storage to an auto-sorter will require:\n" + string.Join("\n", CAutoSorter.Config.UpgradeCosts.Select(_o => _o.Name + ": " + _o.Amount));
+            mi_upgradeOverlayText.text = "Upgrading the storage to an auto-sorter will require:\n" + string.Join("\n", CConfigManager.Config.UpgradeCosts.Select(_o => _o.Name + ": " + _o.Amount));
         }
 
         private void Start()
@@ -154,9 +162,10 @@ namespace pp.RaftMods.AutoSorter
         /// Sets the item prefab reference-
         /// </summary>
         /// <param name="_itemPrefab"></param>
-        public void Load(CAutoSorter _mod, GameObject _itemPrefab)
+        public void Load(CAutoSorter _mod, CConfigManager _configManager, GameObject _itemPrefab)
         {
             mi_mod = _mod;
+            mi_config = _configManager;
             mi_itemAsset = _itemPrefab;
         }
 
@@ -164,7 +173,7 @@ namespace pp.RaftMods.AutoSorter
         /// Shows the storage configuration dialog for the given storage to the user.
         /// </summary>
         /// <param name="_storage">The storage to display a the configuration UI for.</param>
-        public void Show(CSceneStorage _storage)
+        public void Show(ISceneStorage _storage)
         {
             gameObject.SetActive(true);
             mi_isVisible = true;
@@ -176,12 +185,12 @@ namespace pp.RaftMods.AutoSorter
 
             mi_itemAnchor.gameObject.SetActive(_storage.IsUpgraded && mi_loaded && !_storage.Data.AutoMode);
 
-            if (!CAutoSorter.Config.InitialHelpShown)
+            if (!CConfigManager.Config.InitialHelpShown)
             {
                 mi_hideButton.gameObject.SetActive(false);
                 mi_helpOverlay.gameObject.SetActive(true);
-                CAutoSorter.Config.InitialHelpShown = true;
-                mi_mod.SaveConfig();
+                CConfigManager.Config.InitialHelpShown = true;
+                mi_config.SaveConfig();
             }
 
             if (mi_loaded)
@@ -243,7 +252,7 @@ namespace pp.RaftMods.AutoSorter
 
             int current = 0;
             var items = ItemManager.GetAllItems().ToArray();
-            CUtil.LogD($"Loading UI elements for {items.Length} items...");
+            mi_logger.LogD($"Loading UI elements for {items.Length} items...");
             GameObject go;
             foreach (var item in items)
             {
@@ -254,7 +263,7 @@ namespace pp.RaftMods.AutoSorter
                 var cfgItem = go.AddComponent<CUISorterConfigItem>();
                 if (!cfgItem)
                 {
-                    CUtil.LogE("Prefab error on sorter config item. Invalid prefab setup.");
+                    mi_logger.LogE("Prefab error on sorter config item. Invalid prefab setup.");
                     yield break;
                 }
                 cfgItem.Load(mi_mod, item);
@@ -281,7 +290,7 @@ namespace pp.RaftMods.AutoSorter
                 LoadWorkingData();
             }
             mi_initOverlay.gameObject.SetActive(false);
-            CUtil.LogD("Done loading items.");
+            mi_logger.LogD("Done loading items.");
         }
 
         private IEnumerator ReloadItems()
@@ -320,7 +329,7 @@ namespace pp.RaftMods.AutoSorter
             bool vis;
             bool pre;
 
-            CUtil.LogD("Refilter item list with query \"" + mi_searchQuery + "\" and options " + mi_additionalItemFilter);
+            mi_logger.LogD("Refilter item list with query \"" + mi_searchQuery + "\" and options " + mi_additionalItemFilter);
 
             foreach (var item in mi_itemControls)
             {
@@ -348,7 +357,7 @@ namespace pp.RaftMods.AutoSorter
                         )
                         || AdditionalFilterApplies(item.Value);
                 pre = item.Value.gameObject.activeSelf;
-                item.Value.gameObject.SetActive(vis && visible < CAutoSorter.Config.MaxSearchResultItems);
+                item.Value.gameObject.SetActive(vis && visible < CConfigManager.Config.MaxSearchResultItems);
                 visible += vis ? 1 : 0;
                 ++current;
                 if (current >= LOAD_ITEMS_PER_FRAME)
@@ -362,9 +371,9 @@ namespace pp.RaftMods.AutoSorter
             {
                 mi_statusText.text = "No items match your current search query.";
             }
-            else if(visible > CAutoSorter.Config.MaxSearchResultItems)
+            else if(visible > CConfigManager.Config.MaxSearchResultItems)
             {
-                mi_statusText.text = (visible - CAutoSorter.Config.MaxSearchResultItems) + " match your query but are not displayed.\nNarrow down your search to display them.";
+                mi_statusText.text = (visible - CConfigManager.Config.MaxSearchResultItems) + " match your query but are not displayed.\nNarrow down your search to display them.";
             }
             else if(mi_itemControls.Count > visible)
             {
@@ -585,8 +594,8 @@ namespace pp.RaftMods.AutoSorter
         {
             mi_mod.Sounds?.PlayUI_Click();
 
-            mi_currentStorage.AdditionalData = new CGeneralStorageData(mi_currentStorage.AutoSorter.ObjectIndex, true);
-            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.AutoSorter.ObjectIndex) { AdditionalInfo = mi_currentStorage.AdditionalData });
+            mi_currentStorage.AdditionalData = new CGeneralStorageData(mi_currentStorage.ObjectIndex, true);
+            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.ObjectIndex) { AdditionalInfo = mi_currentStorage.AdditionalData });
 
             mi_includeButton.gameObject.SetActive(true);
             mi_ignoreButton.gameObject.SetActive(false);
@@ -598,7 +607,7 @@ namespace pp.RaftMods.AutoSorter
 
             mi_currentStorage.AdditionalData = null;
 
-            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.AutoSorter.ObjectIndex) { AdditionalInfo = null });
+            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.ObjectIndex) { AdditionalInfo = null });
 
             mi_includeButton.gameObject.SetActive(false);
             mi_ignoreButton.gameObject.SetActive(true);
