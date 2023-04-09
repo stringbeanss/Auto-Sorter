@@ -1,4 +1,5 @@
-﻿using TMPro;
+﻿using AutoSorter.Manager;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -17,7 +18,7 @@ namespace pp.RaftMods.AutoSorter
         private System.Action<bool> mi_currentPromptCallback;
         private bool mi_dialogVisible;
 
-        private CAutoSorter mi_mod;
+        private ISoundManager mi_soundManager;
         private readonly IASLogger mi_logger;
 
         public CUIDialog()
@@ -43,9 +44,9 @@ namespace pp.RaftMods.AutoSorter
         }
         #endregion
 
-        public void Load(CAutoSorter _mod)
+        public void Load(ISoundManager _soundManager)
         {
-            mi_mod = _mod;
+            mi_soundManager = _soundManager;
         }
 
         /// <summary>
@@ -100,7 +101,7 @@ namespace pp.RaftMods.AutoSorter
             mi_dialogVisible = true;
             gameObject.SetActive(true);
 
-            mi_mod.Sounds?.PlayUI_OpenMenu();
+            mi_soundManager.PlayUI_OpenMenu();
 
             mi_okButton.gameObject.SetActive(true);
             mi_dialogText.text = _message;
@@ -113,7 +114,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnOkButtonClicked()
         {
-            mi_mod.Sounds.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_currentInfoCallback?.Invoke();
             mi_currentInfoCallback = null;
@@ -126,7 +127,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnCancelButtonClicked()
         {
-            mi_mod.Sounds.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_currentPromptCallback?.Invoke(false);
             mi_currentPromptCallback = null;

@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using AutoSorter.Manager;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace AutoSorter.Wrappers
@@ -18,5 +19,6 @@ namespace AutoSorter.Wrappers
         public static IRemovePlaceable Wrap(this RemovePlaceables _removePlaceable) => new CRemovePlaceableWrapper(_removePlaceable);
         public static IBlock Wrap(this Block _block) => new CBlockWrapper(_block);
         public static IRaftNetwork Wrap(this Raft_Network _network) => new CRaftNetworkWrapper(_network);
+        public static ISoundManager Wrap(this SoundManager _soundManager) => new CRaftSoundManagerWrapper(_soundManager);
     }
 }

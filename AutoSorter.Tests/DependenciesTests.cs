@@ -1,4 +1,4 @@
-﻿using AutoSorter.IOC;
+﻿using AutoSorter.DI;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 
@@ -178,6 +178,128 @@ namespace pp.RaftMods.AutoSorter.Tests
             Assert.IsNull(resolve);
         }
 
+        [TestMethod]
+        public void Resolve_SelfInterface_ThrowsException()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubInterface>();
+
+            Assert.ThrowsException<InvalidOperationException>(() => kernel.Resolve<StubInterface>());
+        }
+
+        [TestMethod]
+        public void Resolve_InterfaceIsTarget_ThrowsException()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubInterface, StubInterfaceDerivingFromInterface>();
+
+            Assert.ThrowsException<InvalidOperationException>(() => kernel.Resolve<StubInterface>());
+        }
+
+        [TestMethod]
+        public void Resolve_SelfClass_ShouldReturnInstance()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubImplementationNoContruct>();
+
+            var resolve = kernel.Resolve<StubImplementationNoContruct>();
+            Assert.IsNotNull(resolve);
+            Assert.IsInstanceOfType(resolve, typeof(StubImplementationNoContruct));
+        }
+
+        [TestMethod]
+        public void Resolve_InstanceParameter_ShouldInjectValue()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubWithValueConstructor>("someValue");
+
+            var resolve = kernel.Resolve<StubWithValueConstructor>();
+            Assert.AreEqual("someValue", resolve.Value);
+        }
+
+        [TestMethod]
+        public void Resolve_InstanceParameterInterfaceBound_ShouldInjectValue()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubInterface, StubWithValueConstructor>("someValue");
+
+            var resolve = kernel.Resolve<StubInterface>();
+            Assert.IsInstanceOfType(resolve, typeof(StubWithValueConstructor));
+            Assert.AreEqual("someValue", ((StubWithValueConstructor)resolve).Value);
+        }
+
+        [TestMethod]
+        public void Call_NoSource_ThrowsException()
+        {
+            var kernel = new Dependencies();
+            Assert.ThrowsException<ArgumentNullException>(() => kernel.Call(null, null));
+        }
+
+        [TestMethod]
+        public void Call_NoMethod_ThrowsException()
+        {
+            var kernel = new Dependencies();
+            Assert.ThrowsException<ArgumentException>(() => kernel.Call(new object(), ""));
+        }
+
+        [TestMethod]
+        public void Call_MethodNotFound_ThrowsException()
+        {
+            var kernel = new Dependencies();
+
+            Assert.ThrowsException<ArgumentException>(() => kernel.Call(new StubWithInjectedMethods(), "somethingWrong"));
+        }
+
+        [TestMethod]
+        public void Call_MethodPrivate_ThrowsException()
+        {
+            var kernel = new Dependencies();
+
+            Assert.ThrowsException<ArgumentException>(() => kernel.Call(new StubWithInjectedMethods(), "IsPrivateNotFound"));
+        }
+
+        [TestMethod]
+        public void Call_MethodStatic_ThrowsException()
+        {
+            var kernel = new Dependencies();
+
+            Assert.ThrowsException<ArgumentException>(() => kernel.Call(new StubWithInjectedMethods(), nameof(StubWithInjectedMethods.IsStaticNotFound)));
+        }
+
+        [TestMethod]
+        public void Call_InjectVoidMethod_ReturnsInstance()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubInterface, StubImplementationNoContruct>();
+
+            var instance = new StubWithInjectedMethods();
+            _ = kernel.Call(instance, nameof(StubWithInjectedMethods.DoInvokeVoid));
+
+            Assert.IsNotNull(instance.Member);
+            Assert.IsInstanceOfType(instance.Member, typeof(StubImplementationNoContruct));
+        }
+
+        [TestMethod]
+        public void Call_InjectReturnMethod_ReturnsNameOfInjectedType()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubInterface, StubImplementationNoContruct>();
+
+            var instance = new StubWithInjectedMethods();
+            string typeName = kernel.Call<string>(instance, nameof(StubWithInjectedMethods.DoInvokeReturns));
+
+            Assert.AreEqual(typeof(StubImplementationNoContruct).Name, typeName);
+        }
+
+        [TestMethod]
+        public void Call_InjectMethod_ParameterTypeNotBound()
+        {
+            var kernel = new Dependencies();
+            kernel.Bind<StubInterface, StubImplementationNoContruct>();
+
+            Assert.ThrowsException<InvalidOperationException>(() => kernel.Call(new StubWithInjectedMethods(), nameof(StubWithInjectedMethods.DoInvokeParameterNotFound)));
+        }
+
         #region STUBS
         interface StubInterface 
         {
@@ -255,6 +377,49 @@ namespace pp.RaftMods.AutoSorter.Tests
                 ID = System.Guid.NewGuid();
                 Member = member;
             }
+        }
+
+        interface StubInterfaceDerivingFromInterface : StubInterface { }
+        
+        class StubWithInjectedMethods
+        {
+            public StubInterface Member;
+
+            public string DoInvokeReturns(StubInterface _injectMe)
+            {
+                return _injectMe.GetType().Name;
+            }
+
+            public void DoInvokeVoid(StubInterface _injectMe)
+            {
+                Member = _injectMe;
+            }
+
+            public void DoInvokeParameterNotFound(StubSingleton _injectMe)
+            {
+            }
+
+            private void IsPrivateNotFound()
+            {
+
+            }
+
+            public static void IsStaticNotFound()
+            {
+
+            }
+        }
+       
+        class StubWithValueConstructor : StubInterface
+        {
+            public string Value;
+
+            public StubWithValueConstructor(string _value)
+            {
+                Value = _value;
+            }
+
+            public NestedStubInterface Member => throw new NotImplementedException();
         }
         #endregion
     }

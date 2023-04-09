@@ -9,7 +9,7 @@ namespace AutoSorter.Wrappers
         bool HasStorageDataForSave(string _saveName);
         CSorterStorageData GetSorterData(string _saveName, ulong _objectIndex);
         CGeneralStorageData GetStorageData(string _saveName, ulong _objectIndex);
-        void LoadStorageData();
-        void SaveStorageData(IEnumerable<ISceneStorage> _storages);
+        void LoadStorageData(string _modDataDirectory);
+        void SaveStorageData(string _modDataDirectory, IEnumerable<ISceneStorage> _storages);
     }
 }

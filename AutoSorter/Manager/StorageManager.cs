@@ -28,19 +28,25 @@ namespace AutoSorter.Manager
         private readonly IItemManager mi_itemManager;
         private readonly IASLogger mi_logger;
         private readonly IRaftNetwork mi_network;
+        private readonly IASNetwork mi_asNetwork;
+        private readonly ISaveAndLoad mi_saveManager;
 
         public CStorageManager(
             IAutoSorter _mod, 
             IStorageDataManager _storageData, 
             IItemManager _itemManager,
+            ISaveAndLoad _saveManager,
             IRaftNetwork _network,
-            IASLogger _logger)
+            IASLogger _logger,
+            IASNetwork _asNetwork)
         {
             mi_mod = _mod;
             mi_storageData = _storageData;
             mi_itemManager = _itemManager;
             mi_network = _network;
             mi_logger = _logger;
+            mi_saveManager = _saveManager;
+            mi_asNetwork = _asNetwork;
 
             Messenger.Default.Register<InventoryChangedMessage>(this);
             Messenger.Default.Register<InventoryDirtyMessage>(this);
@@ -73,6 +79,8 @@ namespace AutoSorter.Manager
 
             mi_registerQueuedStorages.Clear();
             mi_unregisterQueuedStorages.Clear();
+
+            Messenger.Default.UnregisterAll(this);
         }
 
         public void RegisterStorage(IStorageSmall _storage)
@@ -106,23 +114,23 @@ namespace AutoSorter.Manager
             mi_logger.LogD($"Inventory for storage \"{storageForInventory.StorageComponent.ObjectName}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
         }
         
-        public CSceneStorage CreateSceneStorage(IStorageSmall _storage)
+        public ISceneStorage CreateSceneStorage(IStorageSmall _storage)
         {
             var sceneStorage = new CSceneStorage();
 
-            if (Raft_Network.IsHost)
+            if (mi_network.IsHost)
             {
-                if (mi_storageData.HasSorterDataForSave(SaveAndLoad.CurrentGameFileName))
+                if (mi_storageData.HasSorterDataForSave(mi_saveManager.CurrentGameFileName))
                 {
-                    var data = mi_storageData.GetSorterData(SaveAndLoad.CurrentGameFileName, _storage.ObjectIndex);
+                    var data = mi_storageData.GetSorterData(mi_saveManager.CurrentGameFileName, _storage.ObjectIndex);
                     if (data != null)
                     {
                         sceneStorage.Data = data;
                     }
                 }
-                if (mi_storageData.HasStorageDataForSave(SaveAndLoad.CurrentGameFileName))
+                if (mi_storageData.HasStorageDataForSave(mi_saveManager.CurrentGameFileName))
                 {
-                    var additionalData = mi_storageData.GetStorageData(SaveAndLoad.CurrentGameFileName, _storage.ObjectIndex);
+                    var additionalData = mi_storageData.GetStorageData(mi_saveManager.CurrentGameFileName, _storage.ObjectIndex);
                     if (additionalData != null)
                     {
                         sceneStorage.AdditionalData = additionalData;
@@ -133,7 +141,10 @@ namespace AutoSorter.Manager
             sceneStorage.StorageComponent = _storage;
             sceneStorage.AutoSorter = _storage.AddComponent<CStorageBehaviour>();
             sceneStorage.StorageComponent.SetNetworkIdBehaviour(sceneStorage.AutoSorter);
-            sceneStorage.AutoSorter.Load(mi_mod, this, mi_itemManager, mi_network, sceneStorage);
+
+            CASMod.DIContainer.Call(sceneStorage.AutoSorter, nameof(ISorterBehaviour.LoadDependencies));
+
+            sceneStorage.AutoSorter.LoadStorage(sceneStorage);
 
             return sceneStorage;
         }
@@ -143,14 +154,14 @@ namespace AutoSorter.Manager
             if (_inventory is PlayerInventory) return;
             var storageForInventory = SceneStorages.Values.FirstOrDefault(_o => _o.AutoSorter.Inventory == _inventory);
             if (storageForInventory == null) return;
-            if (Raft_Network.IsHost)
+            if (mi_network.IsHost)
             {
                 storageForInventory.IsInventoryDirty = true;
                 mi_logger.LogD($"Inventory for storage \"{storageForInventory.ObjectName}\"({storageForInventory.ObjectIndex}) is marked as dirty.");
             }
             else
             {
-                CNetwork.BroadcastInventoryState(storageForInventory.AutoSorter);
+                mi_asNetwork.BroadcastInventoryState(storageForInventory.AutoSorter);
                 mi_logger.LogD($"Inventory for storage \"{storageForInventory.ObjectName}\"({storageForInventory.ObjectIndex}) changed.");
             }
         }

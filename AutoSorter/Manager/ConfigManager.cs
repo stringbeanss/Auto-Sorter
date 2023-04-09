@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using AutoSorter.Wrappers;
+using Newtonsoft.Json;
 using pp.RaftMods.AutoSorter;
 using System.IO;
 
@@ -11,26 +12,26 @@ namespace AutoSorter.Manager
         /// <summary>
         /// Mod configuration object. Loaded from disk on mod load. 
         /// </summary>
-        public static CModConfig Config { get => ExtraSettingsAPI_Settings; private set { ExtraSettingsAPI_Settings = value; } }
+        public CModConfig Config { get => ExtraSettingsAPI_Settings; private set { ExtraSettingsAPI_Settings = value; } }
 
-        private string ModConfigFilePath => Path.Combine(mi_modDataDirectory, "config.json");
+        private const string CONFIG_NAME = "config.json";
 
-        private readonly string mi_modDataDirectory;
         private readonly IASLogger mi_logger;
+        private readonly IItemManager mi_itemManager;
 
-        public CConfigManager(string _modDataDirectory)
+        public CConfigManager(IASLogger _logger, IItemManager _itemManager)
         {
-            mi_modDataDirectory = _modDataDirectory;
-            mi_logger = LoggerFactory.Default.GetLogger();
+            mi_logger = _logger;
+            mi_itemManager = _itemManager;
         }
 
-        public void SaveConfig()
+        public void SaveConfig(string _modDataDirectory)
         {
             try
             {
-                if (!Directory.Exists(mi_modDataDirectory))
+                if (!Directory.Exists(_modDataDirectory))
                 {
-                    Directory.CreateDirectory(mi_modDataDirectory);
+                    Directory.CreateDirectory(_modDataDirectory);
                 }
 
                 if (Config == null)
@@ -40,7 +41,7 @@ namespace AutoSorter.Manager
 
                 mi_logger.LogD("Save configuration.");
                 File.WriteAllText(
-                    ModConfigFilePath,
+                    Path.Combine(_modDataDirectory, CONFIG_NAME),
                     JsonConvert.SerializeObject(
                         Config,
                         Formatting.Indented,
@@ -56,21 +57,22 @@ namespace AutoSorter.Manager
             }
         }
 
-        public void LoadConfig()
+        public void LoadConfig(string _modDataDirectory)
         {
             try
             {
-                if (!File.Exists(ModConfigFilePath))
+                var configPath = Path.Combine(_modDataDirectory, CONFIG_NAME);
+                if (!File.Exists(configPath))
                 {
-                    SaveConfig();
+                    SaveConfig(_modDataDirectory);
                     return;
                 }
                 mi_logger.LogD("Load configuration.");
-                Config = JsonConvert.DeserializeObject<CModConfig>(File.ReadAllText(ModConfigFilePath)) ?? throw new System.Exception("De-serialisation failed.");
-                //if (Config.UpgradeCosts != null)
-                //{
-                //    foreach (var cost in Config.UpgradeCosts) cost.Load(mi_itemManager);
-                //}
+                Config = JsonConvert.DeserializeObject<CModConfig>(File.ReadAllText(Path.Combine(_modDataDirectory, CONFIG_NAME))) ?? throw new System.Exception("De-serialisation failed.");
+                if (Config.UpgradeCosts != null)
+                {
+                    foreach (var cost in Config.UpgradeCosts) cost.Load(mi_itemManager);
+                }
             }
             catch (System.Exception _e)
             {

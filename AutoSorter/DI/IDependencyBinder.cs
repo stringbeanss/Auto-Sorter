@@ -1,4 +1,4 @@
-﻿namespace AutoSorter.IOC
+﻿namespace AutoSorter.DI
 {
     public interface IDependencyBinder
     {

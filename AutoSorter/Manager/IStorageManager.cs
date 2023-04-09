@@ -14,5 +14,6 @@ namespace AutoSorter.Wrappers
         void RegisterStorage(IStorageSmall _storage);
         ISceneStorage GetStorageByIndex(uint _index);
         void SetStorageInventoryDirty(IInventory _inventory);
+        ISceneStorage CreateSceneStorage(IStorageSmall _storage);
     }
 }

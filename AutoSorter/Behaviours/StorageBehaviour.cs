@@ -19,7 +19,7 @@ namespace pp.RaftMods.AutoSorter
     public class CStorageBehaviour : MonoBehaviour_ID_Network, ISorterBehaviour
     {
         public INetworkPlayer LocalPlayer => mi_localPlayer;
-        public CSceneStorage SceneStorage => mi_sceneStorage;
+        public ISceneStorage SceneStorage => mi_sceneStorage;
         public IInventory Inventory => mi_inventory;
 
         private bool HasInventorySpaceLeft => mi_inventory?.AllSlots.Any(_o => _o.Active && !_o.Locked && !_o.StackIsFull) ?? false;
@@ -29,9 +29,11 @@ namespace pp.RaftMods.AutoSorter
         private IRaftNetwork mi_network;
         private INetworkPlayer mi_localPlayer;
         private IItemManager mi_itemManager;
-        private readonly IASLogger mi_logger;
+        private IASLogger mi_logger;
+        private IASNetwork mi_asNetwork;
+        private CConfigManager mi_configManager;
 
-        private CSceneStorage mi_sceneStorage;
+        private ISceneStorage mi_sceneStorage;
         private IInventory mi_inventory;
 
         private bool mi_customTexCreated;
@@ -40,9 +42,21 @@ namespace pp.RaftMods.AutoSorter
         private Texture2D mi_originalTexture;
         private Texture2D mi_customTexture;
 
-        public CStorageBehaviour()
+        public void LoadDependencies(   IASLogger _logger,
+                                        IAutoSorter _mod,
+                                        IStorageManager _storageManager,
+                                        IItemManager _itemManager,
+                                        IRaftNetwork _network,
+                                        IASNetwork _asNetwork,
+                                        CConfigManager _configManager)
         {
-            mi_logger               = LoggerFactory.Default.GetLogger();
+            mi_mod = _mod;
+            mi_logger = _logger;
+            mi_storageManager = _storageManager;
+            mi_itemManager = _itemManager;
+            mi_network = _network;
+            mi_asNetwork = _asNetwork;
+            mi_configManager = _configManager;
         }
 
         /// <summary>
@@ -51,28 +65,20 @@ namespace pp.RaftMods.AutoSorter
         /// <param name="_mod">A handle to the mod object initializing this storage behaviour.</param>
         /// <param name="_storage">Reference to the scene storage which contains this storage behaviour.</param>
         /// <param name="_configDialog">Reference to the auto-sorter UI.</param>
-        public void Load(   IAutoSorter _mod,
-                            IStorageManager _storageManager, 
-                            IItemManager _itemManager,
-                            IRaftNetwork _network,
-                            CSceneStorage _storage)
+        public void LoadStorage(ISceneStorage _storage)
         {
-            mi_mod                  = _mod;
-            mi_storageManager       = _storageManager;
-            mi_itemManager          = _itemManager;
             mi_sceneStorage         = _storage;
-            mi_network              = _network;
             mi_inventory            = mi_sceneStorage.StorageComponent.GetInventoryReference();
             mi_localPlayer          = mi_network.GetLocalPlayer();
             //use our block objects index so we receive RPC calls
             //need to use an existing block index as clients/host need to be aware of it
             ObjectIndex             = mi_sceneStorage.StorageComponent.ObjectIndex;
 
-            CNetwork.RegisterNetworkBehaviour(this);
+            mi_asNetwork.RegisterNetworkBehaviour(this);
 
             if (!mi_network.IsHost)
             {
-                CNetwork.SendTo(new CDTO(EStorageRequestType.REQUEST_STATE, ObjectIndex), mi_network.HostID);
+                mi_asNetwork.SendTo(new CDTO(EStorageRequestType.REQUEST_STATE, ObjectIndex), mi_network.HostID);
             }
 
             mi_loaded = true;
@@ -127,8 +133,8 @@ namespace pp.RaftMods.AutoSorter
 
                     if(totalItemsTransfered > 0)
                     {
-                        CNetwork.BroadcastInventoryState(storage.AutoSorter);
-                        CNetwork.BroadcastInventoryState(this);
+                        mi_asNetwork.BroadcastInventoryState(storage.AutoSorter);
+                        mi_asNetwork.BroadcastInventoryState(this);
                     }
                 }
             }
@@ -154,7 +160,7 @@ namespace pp.RaftMods.AutoSorter
                     {
                         if (!mi_sceneStorage.IsUpgraded && mi_sceneStorage.AdditionalData == null) return;
 
-                        CNetwork.SendTo(new CDTO(EStorageRequestType.RESPOND_STATE, ObjectIndex) { Info = mi_sceneStorage.Data, AdditionalInfo = mi_sceneStorage.AdditionalData }, _remoteID);
+                        mi_asNetwork.SendTo(new CDTO(EStorageRequestType.RESPOND_STATE, ObjectIndex) { Info = mi_sceneStorage.Data, AdditionalInfo = mi_sceneStorage.AdditionalData }, _remoteID);
                     }
                     break;
                 case EStorageRequestType.RESPOND_STATE:
@@ -209,7 +215,7 @@ namespace pp.RaftMods.AutoSorter
         public bool Upgrade()
         {
             if (!GameModeValueManager.GetCurrentGameModeValue().playerSpecificVariables.unlimitedResources &&
-                CConfigManager.Config.UpgradeCosts.Any(_o => _o.Item != null && mi_localPlayer.Inventory.GetItemCount(_o.Item) < _o.Amount))
+                mi_configManager.Config.UpgradeCosts.Any(_o => _o.Item != null && mi_localPlayer.Inventory.GetItemCount(_o.Item) < _o.Amount))
             {
                 var notif = ComponentManager<HNotify>.Value.AddNotification(
                     HNotify.NotificationType.normal, 
@@ -219,7 +225,7 @@ namespace pp.RaftMods.AutoSorter
                 return false;
             }
 
-            foreach (var cost in CConfigManager.Config.UpgradeCosts)
+            foreach (var cost in mi_configManager.Config.UpgradeCosts)
             {
                 mi_localPlayer.Inventory.RemoveItem(cost.Name, cost.Amount);
             }
@@ -256,7 +262,7 @@ namespace pp.RaftMods.AutoSorter
         {
             base.OnDestroy();
 
-            CNetwork.UnregisterNetworkBehaviour(this);
+            mi_asNetwork.UnregisterNetworkBehaviour(this);
 
             if (mi_customTexture)
             {
@@ -326,11 +332,11 @@ namespace pp.RaftMods.AutoSorter
                     if (!mat) continue;
                     if (mat.HasProperty("_MainTex")) //probably std mat
                     {
-                        mat.color = mi_sceneStorage.IsUpgraded && CConfigManager.Config.ChangeStorageColorOnUpgrade ? Color.red : Color.white;
+                        mat.color = mi_sceneStorage.IsUpgraded && mi_configManager.Config.ChangeStorageColorOnUpgrade ? Color.red : Color.white;
                     }
                     else if (mat.HasProperty("_Diffuse"))
                     {
-                        if (mi_sceneStorage.IsUpgraded && CConfigManager.Config.ChangeStorageColorOnUpgrade)
+                        if (mi_sceneStorage.IsUpgraded && mi_configManager.Config.ChangeStorageColorOnUpgrade)
                         {
                             if (mi_customTexture == null) //pretty heavy operation to make chests red that use the Vegetation shader. There is no way (afaik) to change the main color.
                             {
@@ -359,7 +365,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void SendUpgradeState(bool _isUpgraded)
         {
-            CNetwork.Broadcast(new CDTO(EStorageRequestType.UPGRADE, ObjectIndex) { Upgrade = _isUpgraded }); ;
+            mi_asNetwork.Broadcast(new CDTO(EStorageRequestType.UPGRADE, ObjectIndex) { Upgrade = _isUpgraded }); ;
         }
     
         private bool CheckIsEligibleToTransfer(IItemInstance _item, ISceneStorage _storage, out int _itemRestriction) //make sure if we are transferring between auto-sorters we use priorities to prevent item loops.

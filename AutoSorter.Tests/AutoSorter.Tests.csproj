@@ -72,6 +72,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="MessengerTests.cs" />
     <Compile Include="Logger.cs" />
     <Compile Include="Mock\FakeItemInstance.cs" />
     <Compile Include="Mock\FakeItemBase.cs" />

@@ -1,4 +1,4 @@
-﻿using AutoSorter.IOC;
+﻿using AutoSorter.DI;
 using AutoSorter.Manager;
 using AutoSorter.Wrappers;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -174,6 +174,33 @@ namespace pp.RaftMods.AutoSorter.Tests
             mockLogger.Received().LogD(Arg.Is<string>(_o => _o.StartsWith("Inventory for storage")));
         }
 
+        [TestMethod]
+        public void CreateSceneStorage_AsClient_ShouldSetDirty()
+        {
+            var mockLogger = Substitute.For<IASLogger>();
+
+            var stubStorage = Substitute.For<ISorterBehaviour>();
+            var stubInventory = Substitute.For<IInventory>();
+            stubInventory.Unwrap().Returns(new Inventory());
+            stubStorage.Inventory.Returns(stubInventory);
+
+            var stubNetwork = Substitute.For<IRaftNetwork>();
+            stubNetwork.IsHost.Returns(true);
+
+            var stubSceneStorage = Substitute.For<ISceneStorage>();
+            stubSceneStorage.AutoSorter.Returns(stubStorage);
+
+            mi_dependencies.Bind<IASLogger>().ToConstant(mockLogger);
+            mi_dependencies.Bind<IRaftNetwork>().ToConstant(stubNetwork);
+            var manager = CreateStorageManager();
+
+            manager.SceneStorages.Add(0u, stubSceneStorage);
+          //  manager.CreateSce(stubInventory);
+
+            Assert.IsTrue(stubSceneStorage.IsInventoryDirty);
+            mockLogger.Received().LogD(Arg.Is<string>(_o => _o.StartsWith("Inventory for storage")));
+        }
+
         private IStorageManager CreateStorageManager()
         {
             return mi_dependencies.Resolve<IStorageManager>();
@@ -182,11 +209,16 @@ namespace pp.RaftMods.AutoSorter.Tests
         private void LoadBinds()
         {
             mi_dependencies = new Dependencies();
+
             mi_dependencies.Bind<IASLogger, Logger>();
-            mi_dependencies.Bind<IAutoSorter>().ToConstant(Substitute.For<IAutoSorter>());
-            mi_dependencies.Bind<IStorageDataManager>().ToConstant(new CStorageDataManager(""));
+            mi_dependencies.Bind<IASNetwork, CASNetwork>();
+
+            mi_dependencies.Bind<ICoroutineHandler>().ToConstant(Substitute.For<ICoroutineHandler>());
+            mi_dependencies.Bind<IAutoSorter, CAutoSorter>().AsSingleton();
+            mi_dependencies.Bind<IStorageDataManager, CStorageDataManager>(string.Empty);
             mi_dependencies.Bind<CConfigManager>().AsSingleton();
             mi_dependencies.Bind<IStorageManager, CStorageManager>().AsSingleton();
+
             mi_dependencies.Bind<IItemManager>().ToConstant(Substitute.For<IItemManager>());
             mi_dependencies.Bind<IRaftNetwork>().ToConstant(Substitute.For<IRaftNetwork>());
         }

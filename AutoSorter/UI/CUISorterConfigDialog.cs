@@ -1,4 +1,5 @@
 ﻿using AutoSorter.Manager;
+using AutoSorter.Messaging;
 using AutoSorter.Wrappers;
 using pp.RaftMods.AutoSorter.Protocol;
 using System.Collections;
@@ -65,8 +66,10 @@ namespace pp.RaftMods.AutoSorter
         private MenuType mi_previousMenuType;
         private bool mi_isHidden;
 
-        private CAutoSorter mi_mod;
+        private CModUI mi_modUI;
         private CConfigManager mi_config;
+        private ISoundManager mi_soundManager;
+        private IASNetwork mi_asNetwork;
         private readonly IASLogger mi_logger;
         private EAdditionalItemFilterType mi_additionalItemFilter;
 
@@ -142,8 +145,6 @@ namespace pp.RaftMods.AutoSorter
 
             mi_includeButton.onClick.AddListener(new UnityEngine.Events.UnityAction(OnIncludeButtonClick));
             mi_ignoreButton.onClick.AddListener(new UnityEngine.Events.UnityAction(OnIgnoreButtonClick));
-
-            mi_upgradeOverlayText.text = "Upgrading the storage to an auto-sorter will require:\n" + string.Join("\n", CConfigManager.Config.UpgradeCosts.Select(_o => _o.Name + ": " + _o.Amount));
         }
 
         private void Start()
@@ -155,18 +156,22 @@ namespace pp.RaftMods.AutoSorter
             mi_upgradeOverlay.gameObject.SetActive(false);
 
             gameObject.SetActive(false);
-            mi_helpText.text = CAutoSorter.HelpText;
+            mi_helpText.text = mi_modUI.HelpText;
         }
 
         /// <summary>
         /// Sets the item prefab reference-
         /// </summary>
         /// <param name="_itemPrefab"></param>
-        public void Load(CAutoSorter _mod, CConfigManager _configManager, GameObject _itemPrefab)
+        public void Load(CModUI _mod, CConfigManager _configManager, GameObject _itemPrefab, ISoundManager _soundManager, IASNetwork _asNetwork)
         {
-            mi_mod = _mod;
+            mi_modUI = _mod;
             mi_config = _configManager;
             mi_itemAsset = _itemPrefab;
+            mi_soundManager = _soundManager;
+            mi_asNetwork = _asNetwork;
+
+            mi_upgradeOverlayText.text = "Upgrading the storage to an auto-sorter will require:\n" + string.Join("\n", mi_config.Config.UpgradeCosts.Select(_o => _o.Name + ": " + _o.Amount));
         }
 
         /// <summary>
@@ -185,12 +190,12 @@ namespace pp.RaftMods.AutoSorter
 
             mi_itemAnchor.gameObject.SetActive(_storage.IsUpgraded && mi_loaded && !_storage.Data.AutoMode);
 
-            if (!CConfigManager.Config.InitialHelpShown)
+            if (!mi_config.Config.InitialHelpShown)
             {
                 mi_hideButton.gameObject.SetActive(false);
                 mi_helpOverlay.gameObject.SetActive(true);
-                CConfigManager.Config.InitialHelpShown = true;
-                mi_config.SaveConfig();
+                mi_config.Config.InitialHelpShown = true;
+                Messenger.Default.Send<ConfigChangedMessage>();
             }
 
             if (mi_loaded)
@@ -266,7 +271,7 @@ namespace pp.RaftMods.AutoSorter
                     mi_logger.LogE("Prefab error on sorter config item. Invalid prefab setup.");
                     yield break;
                 }
-                cfgItem.Load(mi_mod, item);
+                cfgItem.Load(mi_modUI, mi_soundManager, item);
                 mi_itemControls.Add(item.UniqueIndex, cfgItem);
                 go.SetActive(false);
                 ++current;
@@ -357,7 +362,7 @@ namespace pp.RaftMods.AutoSorter
                         )
                         || AdditionalFilterApplies(item.Value);
                 pre = item.Value.gameObject.activeSelf;
-                item.Value.gameObject.SetActive(vis && visible < CConfigManager.Config.MaxSearchResultItems);
+                item.Value.gameObject.SetActive(vis && visible < mi_config.Config.MaxSearchResultItems);
                 visible += vis ? 1 : 0;
                 ++current;
                 if (current >= LOAD_ITEMS_PER_FRAME)
@@ -371,9 +376,9 @@ namespace pp.RaftMods.AutoSorter
             {
                 mi_statusText.text = "No items match your current search query.";
             }
-            else if(visible > CConfigManager.Config.MaxSearchResultItems)
+            else if(visible > mi_config.Config.MaxSearchResultItems)
             {
-                mi_statusText.text = (visible - CConfigManager.Config.MaxSearchResultItems) + " match your query but are not displayed.\nNarrow down your search to display them.";
+                mi_statusText.text = (visible - mi_config.Config.MaxSearchResultItems) + " match your query but are not displayed.\nNarrow down your search to display them.";
             }
             else if(mi_itemControls.Count > visible)
             {
@@ -404,21 +409,21 @@ namespace pp.RaftMods.AutoSorter
         {
             if (mi_currentStorage.AutoSorter.Upgrade())
             {
-                mi_mod.Sounds?.PlayUI_Click();
+                mi_soundManager.PlayUI_Click();
                 mi_upgradeOverlay.gameObject.SetActive(false);
                 LoadWorkingData();
             }
             else
             {
-                mi_mod.Sounds?.PlayUI_Click_Fail();
+                mi_soundManager.PlayUI_Click_Fail();
             }
         }
 
         private void OnDowngradeButtonClicked()
         {
-            mi_mod.Sounds.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
-            mi_mod.Dialog.ShowPrompt(
+            mi_modUI.Dialog.ShowPrompt(
                 "Are you sure you want to downgrade to a regular storage?",
                 _result =>
                 {
@@ -433,7 +438,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnAutoModeToggled(bool _isOn)
         {
-            mi_mod.Sounds.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_currentStorage.Data.AutoMode = _isOn;
 
@@ -445,7 +450,7 @@ namespace pp.RaftMods.AutoSorter
             ++mi_currentStorage.Data.Priority;
             UpdatePriorityLabel();
 
-            mi_mod.Sounds.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
         }
 
         private void OnPriorityDecreaseButtonClick()
@@ -453,7 +458,7 @@ namespace pp.RaftMods.AutoSorter
             --mi_currentStorage.Data.Priority;
             UpdatePriorityLabel();
 
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
         }
     
         private void OnInputValueChanged(string _input)
@@ -481,9 +486,9 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnSelectAllClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
-            mi_mod.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?", 
+            mi_modUI.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?", 
             _result =>
             {
                 if (!_result) return;
@@ -496,9 +501,9 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnDeselectAllClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
-            mi_mod.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?",
+            mi_modUI.Dialog.ShowPrompt("This will wipe your current selection.\nContinue?",
             _result =>
             {
                 if (!_result) return;
@@ -511,7 +516,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnSelectFilteredClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             foreach (var toggle in mi_itemControls)
             {
@@ -522,7 +527,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnDeselectFilteredClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             foreach (var toggle in mi_itemControls)
             {
@@ -533,7 +538,7 @@ namespace pp.RaftMods.AutoSorter
         
         private void OnCloseHelpButtonClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(true);
             mi_helpOverlay.gameObject.SetActive(false);
@@ -541,7 +546,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnOpenHelpButtonClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(false);
             mi_helpOverlay.gameObject.SetActive(true);
@@ -549,7 +554,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnHideButtonClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(false);
             mi_showButton.gameObject.SetActive(true);
@@ -568,7 +573,7 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnShowButtonClicked()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_hideButton.gameObject.SetActive(true);
             mi_showButton.gameObject.SetActive(false);
@@ -592,10 +597,10 @@ namespace pp.RaftMods.AutoSorter
         }
         private void OnIgnoreButtonClick()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_currentStorage.AdditionalData = new CGeneralStorageData(mi_currentStorage.ObjectIndex, true);
-            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.ObjectIndex) { AdditionalInfo = mi_currentStorage.AdditionalData });
+            mi_asNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.ObjectIndex) { AdditionalInfo = mi_currentStorage.AdditionalData });
 
             mi_includeButton.gameObject.SetActive(true);
             mi_ignoreButton.gameObject.SetActive(false);
@@ -603,11 +608,11 @@ namespace pp.RaftMods.AutoSorter
 
         private void OnIncludeButtonClick()
         {
-            mi_mod.Sounds?.PlayUI_Click();
+            mi_soundManager.PlayUI_Click();
 
             mi_currentStorage.AdditionalData = null;
 
-            CNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.ObjectIndex) { AdditionalInfo = null });
+            mi_asNetwork.Broadcast(new CDTO(EStorageRequestType.STORAGE_IGNORE_UPDATE, mi_currentStorage.ObjectIndex) { AdditionalInfo = null });
 
             mi_includeButton.gameObject.SetActive(false);
             mi_ignoreButton.gameObject.SetActive(true);

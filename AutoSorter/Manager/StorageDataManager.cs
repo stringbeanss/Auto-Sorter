@@ -10,8 +10,8 @@ namespace AutoSorter.Manager
 {
     public class CStorageDataManager : IStorageDataManager
     {
-        private string ModDataFilePath => Path.Combine(m_modDataDirectory, "storagedata.json");
-        private string ModAdditionalDataFilePath => Path.Combine(m_modDataDirectory, "additional_storagedata.json");
+        private const string MOD_DATA_NAME = "storagedata.json";
+        private const string MOD_ADDITIONAL_DATA_NAME = "additional_storagedata.json";
 
         /// <summary>
         /// Storage data which is loaded and saved to disk to preserve auto-sorter configurations. 
@@ -24,25 +24,23 @@ namespace AutoSorter.Manager
         /// </summary>
         private Dictionary<string, CGeneralStorageData[]> SavedAdditionaStorageData { get; set; } = new Dictionary<string, CGeneralStorageData[]>();
 
-        private readonly string m_modDataDirectory;
         private readonly IASLogger mi_logger;
 
-        public CStorageDataManager(string _modDataDirectory)
+        public CStorageDataManager(IASLogger _logger)
         {
-            m_modDataDirectory = _modDataDirectory;
-            mi_logger = LoggerFactory.Default.GetLogger();
+            mi_logger = _logger;
         }
 
-        public void LoadStorageData()
+        public void LoadStorageData(string _modDataDirectory)
         {
-            LoadSorterStorageData();
-            LoadAdditionalStorageData();
+            LoadSorterStorageData(_modDataDirectory);
+            LoadAdditionalStorageData(_modDataDirectory);
         }
 
-        public void SaveStorageData(IEnumerable<ISceneStorage> _sceneStorages)
+        public void SaveStorageData(string _modDataDirectory, IEnumerable<ISceneStorage> _sceneStorages)
         {
-            SaveSorterStorageData(_sceneStorages);
-            SaveAdditionalStorageData(_sceneStorages);
+            SaveSorterStorageData(_modDataDirectory, _sceneStorages);
+            SaveAdditionalStorageData(_modDataDirectory, _sceneStorages);
         }
 
         public bool HasSorterDataForSave(string _saveName)
@@ -67,13 +65,15 @@ namespace AutoSorter.Manager
             return SavedAdditionaStorageData[_saveName].FirstOrDefault(_o => _o.ObjectID == _objectIndex);
         }
 
-        private void LoadSorterStorageData()
+        private void LoadSorterStorageData(string _modDataDirectory)
         {
             try
             {
-                if (!File.Exists(ModDataFilePath)) return;
+                var modDataFilePath = Path.Combine(_modDataDirectory, MOD_DATA_NAME);
 
-                CSorterStorageData[] data = JsonConvert.DeserializeObject<CSorterStorageData[]>(File.ReadAllText(ModDataFilePath)) ?? throw new Exception("De-serialisation failed.");
+                if (!File.Exists(modDataFilePath)) return;
+
+                CSorterStorageData[] data = JsonConvert.DeserializeObject<CSorterStorageData[]>(File.ReadAllText(modDataFilePath)) ?? throw new Exception("De-serialisation failed.");
                 SavedSorterStorageData = data
                     .Where(_o => !string.IsNullOrEmpty(_o.SaveName))
                     .GroupBy(_o => _o.SaveName)
@@ -95,15 +95,16 @@ namespace AutoSorter.Manager
             }
         }
 
-        private void SaveSorterStorageData(IEnumerable<ISceneStorage> _sceneStorages)
+        private void SaveSorterStorageData(string _modDataDirectory, IEnumerable<ISceneStorage> _sceneStorages)
         {
             try
             {
                 if (_sceneStorages == null || !_sceneStorages.Any()) return;
 
-                if (File.Exists(ModDataFilePath))
+                var modDataFilePath = Path.Combine(_modDataDirectory, MOD_DATA_NAME);
+                if (File.Exists(modDataFilePath))
                 {
-                    File.Delete(ModDataFilePath);
+                    File.Delete(modDataFilePath);
                 }
 
                 if (SavedSorterStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
@@ -124,7 +125,7 @@ namespace AutoSorter.Manager
                         .ToArray());
 
                 File.WriteAllText(
-                    ModDataFilePath,
+                    modDataFilePath,
                     JsonConvert.SerializeObject(
                         SavedSorterStorageData.SelectMany(_o => _o.Value).ToArray(),
                         Formatting.None,
@@ -140,13 +141,14 @@ namespace AutoSorter.Manager
             }
         }
 
-        private void LoadAdditionalStorageData()
+        private void LoadAdditionalStorageData(string _modDataDirectory)
         {
             try
             {
-                if (!File.Exists(ModAdditionalDataFilePath)) return;
+                var modAdditionalDataFilePath = Path.Combine(_modDataDirectory, MOD_ADDITIONAL_DATA_NAME);
+                if (!File.Exists(modAdditionalDataFilePath)) return;
 
-                CGeneralStorageData[] data = JsonConvert.DeserializeObject<CGeneralStorageData[]>(File.ReadAllText(ModAdditionalDataFilePath)) ?? throw new System.Exception("De-serialisation failed.");
+                CGeneralStorageData[] data = JsonConvert.DeserializeObject<CGeneralStorageData[]>(File.ReadAllText(modAdditionalDataFilePath)) ?? throw new System.Exception("De-serialisation failed.");
                 SavedAdditionaStorageData = data
                     .GroupBy(_o => _o.SaveName)
                     .Select(_o => new KeyValuePair<string, CGeneralStorageData[]>(_o.Key, _o.ToArray()))
@@ -160,15 +162,17 @@ namespace AutoSorter.Manager
             }
         }
 
-        private void SaveAdditionalStorageData(IEnumerable<ISceneStorage> _storages)
+        private void SaveAdditionalStorageData(string _modDataDirectory, IEnumerable<ISceneStorage> _storages)
         {
             try
             {
                 if (_storages == null || !_storages.Any()) return;
 
-                if (File.Exists(ModAdditionalDataFilePath))
+                var modAdditionalDataFilePath = Path.Combine(_modDataDirectory, MOD_ADDITIONAL_DATA_NAME);
+
+                if (File.Exists(modAdditionalDataFilePath))
                 {
-                    File.Delete(ModAdditionalDataFilePath);
+                    File.Delete(modAdditionalDataFilePath);
                 }
 
                 if (SavedAdditionaStorageData.ContainsKey(SaveAndLoad.CurrentGameFileName))
@@ -184,7 +188,7 @@ namespace AutoSorter.Manager
                         .ToArray());
 
                 File.WriteAllText(
-                    ModAdditionalDataFilePath,
+                    modAdditionalDataFilePath,
                     JsonConvert.SerializeObject(
                         SavedAdditionaStorageData.SelectMany(_o => _o.Value).ToArray(),
                         Formatting.None,
