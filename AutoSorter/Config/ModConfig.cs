@@ -47,10 +47,10 @@ namespace pp.RaftMods.AutoSorter
             ReturnItemsOnDowngradeMultiplier    = 0.5f;
             UpgradeCosts                        = new[]
             {
-                new UpgradeCost("Plastic", 20),
-                new UpgradeCost("Scrap", 10),
-                new UpgradeCost("CircuitBoard", 6),
-                new UpgradeCost("Battery", 1)
+                new UpgradeCost("Plastic", 5),
+                new UpgradeCost("Scrap", 1),
+                new UpgradeCost("CircuitBoard", 0),
+                new UpgradeCost("Battery", 0)
             };
         }
 
